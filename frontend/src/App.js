@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
-import { RefreshCw, Play, Upload, GitBranch, Zap, Cpu, Settings } from 'lucide-react';
+import { RefreshCw, Play, Upload, GitBranch, Zap, Cpu, Settings, DollarSign } from 'lucide-react';
 import axios from 'axios';
+import CostCalculator from './CostCalculator';
 
 // === DATA MOCKING & CONSTANTS ===
 const AGENT_MODELS = ['GPT-4 (Simulated)', 'Claude-3 (Simulated)', 'Gemini (Simulated)', 'Custom LLM (Simulated)'];
@@ -32,6 +33,7 @@ const INITIAL_STATE = {
 
 // === COMPONENT: AgentControlCenter ===
 const App = () => {
+  const [currentView, setCurrentView] = useState('qa-agent'); // 'qa-agent' or 'cost-calculator'
   const [state, setState] = useState(INITIAL_STATE);
   const { status, workflow, logHistory, finalReport } = state;
 
@@ -178,14 +180,54 @@ const App = () => {
   );
 
   return (
-    <div className="min-h-screen bg-[#FDFBF8] p-4 sm:p-8">
-      <header className="max-w-7xl mx-auto mb-8 text-center">
-        <h1 className="text-4xl font-bold text-gray-800">
-          <Settings className="inline-block w-8 h-8 mr-2 text-amber-600" />
-          Multi-Agent QA Control Center
-        </h1>
-        <p className="text-gray-600 mt-2">Configure, execute, and monitor the automated cognitive testing pipeline.</p>
-      </header>
+    <div className="min-h-screen bg-[#FDFBF8]">
+      {/* Navigation Bar */}
+      <nav className="bg-white shadow-md border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center space-x-2">
+              <Settings className="w-6 h-6 text-amber-600" />
+              <span className="text-xl font-bold text-gray-800">QA AI Agent Platform</span>
+            </div>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => setCurrentView('qa-agent')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2 ${
+                  currentView === 'qa-agent'
+                    ? 'bg-amber-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <Cpu className="w-4 h-4" />
+                <span>QA Agents</span>
+              </button>
+              <button
+                onClick={() => setCurrentView('cost-calculator')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2 ${
+                  currentView === 'cost-calculator'
+                    ? 'bg-amber-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <DollarSign className="w-4 h-4" />
+                <span>Cost Calculator</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      {/* Conditional Content Rendering */}
+      {currentView === 'cost-calculator' ? (
+        <CostCalculator />
+      ) : (
+        <div className="p-4 sm:p-8">
+          <header className="max-w-7xl mx-auto mb-8 text-center">
+            <h1 className="text-4xl font-bold text-gray-800">
+              Multi-Agent QA Control Center
+            </h1>
+            <p className="text-gray-600 mt-2">Configure, execute, and monitor the automated cognitive testing pipeline.</p>
+          </header>
 
       <div className="max-w-7xl mx-auto grid lg:grid-cols-3 gap-8">
 
@@ -428,6 +470,8 @@ const App = () => {
         </div>
 
       </div>
+        </div>
+      )}
     </div>
   );
 };

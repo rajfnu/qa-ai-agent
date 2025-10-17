@@ -1,11 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import planner, generator, healer
+from app.routers import planner, generator, healer, cost_calculator_v2
 
 app = FastAPI(
     title="QA AI Agent API",
-    description="Backend API for Multi-Agent QA Automation System",
-    version="1.0.0"
+    description="Backend API for Multi-Agent QA Automation System & Production Cost Calculator",
+    version="2.0.0"
 )
 
 # Enable CORS for frontend communication
@@ -21,6 +21,9 @@ app.add_middleware(
 app.include_router(planner.router, prefix="/api", tags=["Planner Agent"])
 app.include_router(generator.router, prefix="/api", tags=["Generator Agent"])
 app.include_router(healer.router, prefix="/api", tags=["Healer Agent"])
+
+# Include cost calculator V2 (Production-ready with AI agents)
+app.include_router(cost_calculator_v2.router, prefix="/api/cost", tags=["Cost Calculator"])
 
 @app.get("/")
 async def root():
