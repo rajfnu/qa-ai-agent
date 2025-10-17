@@ -11,21 +11,46 @@ router = APIRouter()
 
 AI_AGENTS = {
     "sales-coach": {
-        "name": "Sales Coach in the Pocket",
-        "description": "AI-powered sales assistant with CRM integration, competitive intelligence, and meeting coaching",
-        "agents_count": 8,
-        "agents": ["Research", "Strategy", "Content", "Analytics", "Risk", "Competitive Intel", "Meeting Coach", "Opportunity Scoring"],
+        "name": "Sales Coach in the Pocket (SCIP) - OPTIMIZED v2.1",
+        "description": "Lean 6-7 agent architecture following ImpactWon methodology for 4Cs assessment. 70% fewer agents, 57% cost savings vs v2.0",
+        "agents_count": 7,
+        "agents": [
+            "Supervisor Agent",
+            "Power Plan Agent (4Cs) - CRITICAL",
+            "Strategic Planning Agent (CEO+Attainment+Pursuit)",
+            "Client Intelligence Agent (Profiling+BBB+Right Clients)",
+            "Deal Assessment Agent (Right Deals+Find Money+Risk)",
+            "Team Orchestration Agent (Team Plan+Right Team)",
+            "Real-time Coach Agent (OPTIONAL)"
+        ],
+        "mcp_tools": [
+            "research_tool (MCP Server)",
+            "content_generation_tool (MCP Server)",
+            "competitive_intel_tool (MCP Server)",
+            "fog_analysis_tool (Function)",
+            "engagement_excellence_tool (Function)",
+            "impact_theme_generator_tool (Function)",
+            "license_to_sell_tool (Function)",
+            "find_money_validator_tool (Function)"
+        ],
         "data_buckets": 4,
-        "data_sources": ["ZoomInfo", "LinkedIn Sales Navigator", "Clearbit", "HubSpot/Salesforce CRM"],
-        "complexity": "high",
+        "data_sources": [
+            "ZoomInfo (Premium)",
+            "LinkedIn Sales Navigator (Premium)",
+            "Clearbit (Premium)",
+            "HubSpot/Salesforce CRM (Data Sync only, no UI)",
+            "News APIs",
+            "Social Media APIs"
+        ],
+        "complexity": "medium",  # Reduced from "high" due to optimization
         "base_infrastructure": {
-            "aks_nodes": 12,
-            "gpu_nodes": 4,
-            "sql_vcores": 16,
-            "cosmos_ru": 60000,
-            "neo4j_nodes": 3,
-            "storage_hot_tb": 25,
-            "storage_cool_tb": 200
+            "aks_nodes": 8,  # Reduced from 12 (fewer agents)
+            "gpu_nodes": 0,  # No local LLM hosting, using API-based models
+            "sql_vcores": 12,  # Reduced from 16
+            "cosmos_ru": 45000,  # Reduced from 60000
+            "neo4j_nodes": 2,  # Reduced from 3 (smaller graph)
+            "storage_hot_tb": 15,  # Reduced from 25
+            "storage_cool_tb": 120  # Reduced from 200
         }
     },
     "qa-agent": {
@@ -154,42 +179,74 @@ AZURE_PRICING_SYDNEY = {
     }
 }
 
-# LLM Pricing (USD per 1M tokens) - Using Anthropic API (Claude) and Azure OpenAI (GPT-4)
+# LLM Pricing (USD per 1M tokens) - January 2025 Pricing
+# Sources: OpenAI API pricing, Anthropic API pricing, Google Gemini pricing
 # Note: Claude is NOT available on Azure, using Anthropic API pricing
 LLM_PRICING_USD = {
     "gpt-4o": {
-        "input": 2.50,  # per 1M tokens
-        "output": 10.00,  # per 1M tokens
-        "cache_read": 1.25,  # 50% discount for cached
+        "input": 2.50,  # per 1M input tokens (Azure OpenAI)
+        "output": 10.00,  # per 1M output tokens
+        "cache_read": 1.25,  # 50% discount for prompt caching
+        "provider": "Azure OpenAI",
+        "context_window": 128000
     },
     "gpt-4-turbo": {
         "input": 10.00,
         "output": 30.00,
         "cache_read": 5.00,
+        "provider": "Azure OpenAI",
+        "context_window": 128000
     },
-    "claude-3.5-sonnet": {  # Via Anthropic API
+    "gpt-3.5-turbo": {
+        "input": 0.50,  # Cheaper option for simple tasks
+        "output": 1.50,
+        "cache_read": 0.25,
+        "provider": "Azure OpenAI",
+        "context_window": 16000
+    },
+    "claude-3.5-sonnet": {  # Via Anthropic API (NOT on Azure)
         "input": 3.00,
         "output": 15.00,
-        "cache_read": 0.30,  # 90% discount for cached
+        "cache_read": 0.30,  # 90% discount for prompt caching
+        "provider": "Anthropic API",
+        "context_window": 200000
     },
-    "claude-3.5-opus": {  # Via Anthropic API
+    "claude-3.5-opus": {  # Via Anthropic API (NOT on Azure)
         "input": 15.00,
         "output": 75.00,
-        "cache_read": 1.50,
+        "cache_read": 1.50,  # 90% discount
+        "provider": "Anthropic API",
+        "context_window": 200000
     },
-    "llama-3.1-70b": {  # Self-hosted on GPU
+    "gemini-1.5-pro": {  # Google Gemini via API
+        "input": 1.25,
+        "output": 5.00,
+        "cache_read": 0.625,  # 50% discount
+        "provider": "Google AI API",
+        "context_window": 2000000  # 2M context!
+    },
+    "llama-3.1-70b": {  # Self-hosted on Azure GPU (NOT recommended for SCIP)
         "input": 0.00,  # No API costs, just infrastructure
         "output": 0.00,
-        "infrastructure_monthly": 3000,  # Estimated GPU hosting cost
+        "cache_read": 0.00,
+        "infrastructure_monthly": 0,  # Included in GPU node cost (if used)
+        "provider": "Self-hosted",
+        "context_window": 128000,
+        "note": "Not recommended for SCIP v2.1 - use API-based models"
     }
 }
 
-# Premium Data Source Pricing (USD per month)
+# Premium Data Source Pricing (USD per month) - January 2025
+# Note: These are enterprise tier prices for 100 users
 DATA_SOURCE_PRICING_USD = {
-    "zoominfo": 15000,  # Enterprise tier
-    "linkedin_sales_navigator": 9900,  # 100 seats @ $99/month
-    "clearbit": 12000,  # Enterprise tier
-    "hubspot_enterprise": 5000,  # CRM Enterprise
+    "zoominfo": 15000,  # Enterprise tier (100 seats)
+    "linkedin_sales_navigator": 9900,  # 100 seats @ $99/month/seat
+    "clearbit": 12000,  # Enterprise tier with enrichment API
+    "hubspot_enterprise": 0,  # Using data sync only (no additional UI cost)
+    "salesforce_api": 0,  # Data sync via REST API (included in existing licenses)
+    "news_apis": 200,  # NewsAPI + aggregators
+    "social_media_apis": 150,  # Twitter/LinkedIn APIs
+    "company_data_apis": 300,  # Crunchbase, PitchBook access
 }
 
 # Exchange Rate (AUD to USD)
@@ -246,6 +303,7 @@ class AgentArchitecture(BaseModel):
     description: str
     agents_count: int
     agents_list: List[str]
+    mcp_tools: Optional[List[str]] = []  # MCP tools and functions
     data_buckets: int
     data_sources: List[str]
     complexity: str
@@ -572,18 +630,28 @@ def calculate_data_source_costs(agent_type: str) -> tuple[float, List[CostBreakd
     agent = AI_AGENTS[agent_type]
     data_sources = agent["data_sources"]
 
-    # Map data source names to pricing
+    # Map data source names to pricing (updated for SCIP v2.1)
     source_mapping = {
+        "ZoomInfo (Premium)": "zoominfo",
         "ZoomInfo": "zoominfo",
+        "LinkedIn Sales Navigator (Premium)": "linkedin_sales_navigator",
         "LinkedIn Sales Navigator": "linkedin_sales_navigator",
+        "Clearbit (Premium)": "clearbit",
         "Clearbit": "clearbit",
-        "HubSpot/Salesforce CRM": "hubspot_enterprise"
+        "HubSpot/Salesforce CRM (Data Sync only, no UI)": "hubspot_enterprise",
+        "HubSpot/Salesforce CRM": "hubspot_enterprise",
+        "News APIs": "news_apis",
+        "Social Media APIs": "social_media_apis",
+        "Company Data APIs": "company_data_apis"
     }
 
     for source in data_sources:
         pricing_key = source_mapping.get(source)
         if pricing_key and pricing_key in DATA_SOURCE_PRICING_USD:
             monthly_cost_usd = DATA_SOURCE_PRICING_USD[pricing_key]
+            if monthly_cost_usd == 0:
+                # Skip zero-cost items (like CRM data sync)
+                continue
             monthly_cost = monthly_cost_usd / AUD_TO_USD
             total += monthly_cost
             breakdown.append(CostBreakdown(
@@ -717,6 +785,7 @@ async def calculate_costs(params: CostCalculatorRequest):
         description=agent_info["description"],
         agents_count=agent_info["agents_count"],
         agents_list=agent_info["agents"],
+        mcp_tools=agent_info.get("mcp_tools", []),  # Include MCP tools if available
         data_buckets=agent_info["data_buckets"],
         data_sources=agent_info["data_sources"],
         complexity=agent_info["complexity"],

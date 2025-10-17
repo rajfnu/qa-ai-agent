@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { RefreshCw, Play, Upload, GitBranch, Zap, Cpu, Settings, DollarSign } from 'lucide-react';
+import { RefreshCw, Play, Upload, GitBranch, Zap, Cpu, Settings, DollarSign, Briefcase } from 'lucide-react';
 import axios from 'axios';
 import CostCalculator from './CostCalculator';
+import SalesCoach from './SalesCoach';
 
 // === DATA MOCKING & CONSTANTS ===
 const AGENT_MODELS = ['GPT-4 (Simulated)', 'Claude-3 (Simulated)', 'Gemini (Simulated)', 'Custom LLM (Simulated)'];
@@ -33,9 +34,9 @@ const INITIAL_STATE = {
 
 // === COMPONENT: AgentControlCenter ===
 const App = () => {
-  const [currentView, setCurrentView] = useState('qa-agent'); // 'qa-agent' or 'cost-calculator'
+  const [currentView, setCurrentView] = useState('qa-agent'); // 'qa-agent', 'sales-coach', or 'cost-calculator'
   const [state, setState] = useState(INITIAL_STATE);
-  const { status, workflow, logHistory, finalReport } = state;
+  const { status, workflow, logHistory, finalReport} = state;
 
   // Utility to update workflow status and append to log history
   const updateWorkflow = useCallback((agentIndex, newStatus, message) => {
@@ -199,7 +200,18 @@ const App = () => {
                 }`}
               >
                 <Cpu className="w-4 h-4" />
-                <span>QA Agents</span>
+                <span>QA AI Agent</span>
+              </button>
+              <button
+                onClick={() => setCurrentView('sales-coach')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2 ${
+                  currentView === 'sales-coach'
+                    ? 'bg-amber-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <Briefcase className="w-4 h-4" />
+                <span>Sales Coach in the Pocket</span>
               </button>
               <button
                 onClick={() => setCurrentView('cost-calculator')}
@@ -220,6 +232,8 @@ const App = () => {
       {/* Conditional Content Rendering */}
       {currentView === 'cost-calculator' ? (
         <CostCalculator />
+      ) : currentView === 'sales-coach' ? (
+        <SalesCoach />
       ) : (
         <div className="p-4 sm:p-8">
           <header className="max-w-7xl mx-auto mb-8 text-center">

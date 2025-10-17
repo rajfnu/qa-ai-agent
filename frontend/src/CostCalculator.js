@@ -192,6 +192,19 @@ const CostCalculator = () => {
             </div>
           </div>
 
+          {results.agent_architecture.mcp_tools && results.agent_architecture.mcp_tools.length > 0 && (
+            <div className="mb-4">
+              <h4 className="font-semibold text-gray-700 mb-2">MCP Tools & Functions:</h4>
+              <div className="flex flex-wrap gap-2">
+                {results.agent_architecture.mcp_tools.map((tool, idx) => (
+                  <span key={idx} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">
+                    {tool}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div>
             <h4 className="font-semibold text-gray-700 mb-2">Data Sources:</h4>
             <div className="flex flex-wrap gap-2">
