@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, TrendingUp, Server, Database, Cloud, BarChart3, Users, Zap, Settings } from 'lucide-react';
+import { DollarSign, TrendingUp, Server, Database, Cloud, BarChart3, Users, Zap, Settings, RefreshCw } from 'lucide-react';
 import axios from 'axios';
+import { useAppContext } from './AppContext';
 
 const CostCalculator = () => {
+  // Get Sales Coach configuration from context
+  const { salesCoachConfig, getSalesCoachCostParams } = useAppContext();
   // Available AI Agents
   const [availableAgents, setAvailableAgents] = useState([]);
   
@@ -33,6 +36,12 @@ const CostCalculator = () => {
     cache_hit_rate: 0.70,
     use_prompt_caching: true,
     use_reserved_instances: true
+  });
+
+  // Manual pricing overrides
+  const [manualPricing, setManualPricing] = useState({
+    dataSources: {},  // { "ZoomInfo": 15000, "LinkedIn": 9900, ... }
+    monitoring: {}    // { "Log Analytics": 350, "Application Insights": 325, ... }
   });
 
   // Fetch available agents on mount
@@ -100,6 +109,17 @@ const CostCalculator = () => {
   const handleAgentChange = (agentId) => {
     setSelectedAgent(agentId);
     setParams(prev => ({ ...prev, agent_type: agentId }));
+  };
+
+  // Load Sales Coach configuration into Cost Calculator
+  const loadSalesCoachConfig = () => {
+    const salesCoachParams = getSalesCoachCostParams();
+    // Merge with existing params to preserve defaults like infrastructure_scale
+    setParams(prev => ({
+      ...prev,
+      ...salesCoachParams
+    }));
+    setSelectedAgent('sales-coach');
   };
 
   const formatCurrency = (amount) => {
@@ -361,83 +381,159 @@ const CostCalculator = () => {
     </div>
   );
 
-  const DataSourcesTab = () => (
-    <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
-      <h3 className="text-xl font-bold text-gray-800 mb-4">Premium Data Sources</h3>
-      {results && results.data_source_breakdown && results.data_source_breakdown.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b-2 border-gray-200">
-                <th className="text-left py-3 px-4 font-semibold text-gray-700">Data Source</th>
-                <th className="text-right py-3 px-4 font-semibold text-gray-700">Monthly</th>
-                <th className="text-right py-3 px-4 font-semibold text-gray-700">Annual</th>
-                <th className="text-left py-3 px-4 font-semibold text-gray-700">Plan</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.data_source_breakdown.map((item, idx) => (
-                <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
-                  <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
-                  <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
-                  <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
-                </tr>
-              ))}
-              <tr className="bg-green-50 font-bold">
-                <td className="py-3 px-4 text-gray-900">Total Data Sources</td>
-                <td className="py-3 px-4 text-right text-green-900">{formatCurrency(results.data_source_costs)}</td>
-                <td className="py-3 px-4 text-right text-green-900">{formatCurrency(results.data_source_costs * 12)}</td>
-                <td></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="text-gray-500">No premium data sources for this agent</p>
-      )}
-    </div>
-  );
+  const DataSourcesTab = () => {
+    const handleDataSourcePriceChange = (sourceName, value) => {
+      setManualPricing(prev => ({
+        ...prev,
+        dataSources: {
+          ...prev.dataSources,
+          [sourceName]: parseFloat(value) || 0
+        }
+      }));
+    };
 
-  const MonitoringTab = () => (
-    <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
-      <h3 className="text-xl font-bold text-gray-800 mb-4">Monitoring & Observability</h3>
-      {results && results.monitoring_breakdown && results.monitoring_breakdown.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b-2 border-gray-200">
-                <th className="text-left py-3 px-4 font-semibold text-gray-700">Service</th>
-                <th className="text-right py-3 px-4 font-semibold text-gray-700">Quantity</th>
-                <th className="text-right py-3 px-4 font-semibold text-gray-700">Monthly</th>
-                <th className="text-right py-3 px-4 font-semibold text-gray-700">Annual</th>
-                <th className="text-left py-3 px-4 font-semibold text-gray-700">Description</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.monitoring_breakdown.map((item, idx) => (
-                <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
-                  <td className="py-3 px-4 text-right text-gray-600">{item.quantity.toFixed(0)} {item.unit}</td>
-                  <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
-                  <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
-                  <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
-                </tr>
-              ))}
-              <tr className="bg-orange-50 font-bold">
-                <td className="py-3 px-4 text-gray-900" colSpan="2">Total Monitoring</td>
-                <td className="py-3 px-4 text-right text-orange-900">{formatCurrency(results.monitoring_costs)}</td>
-                <td className="py-3 px-4 text-right text-orange-900">{formatCurrency(results.monitoring_costs * 12)}</td>
-                <td></td>
-              </tr>
-            </tbody>
-          </table>
+    return (
+      <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold text-gray-800">Premium Data Sources</h3>
+          <div className="text-xs text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+            Manual Pricing Override Enabled
+          </div>
         </div>
-      ) : (
-        <p className="text-gray-500">No monitoring data available</p>
-      )}
-    </div>
-  );
+
+        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <p className="text-sm text-yellow-800">
+            <strong>💡 Manual Pricing:</strong> You can override the default pricing for each data source below.
+            Enter your actual contract prices in USD per month.
+          </p>
+        </div>
+
+        {results && results.data_source_breakdown && results.data_source_breakdown.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b-2 border-gray-200">
+                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Data Source</th>
+                  <th className="text-right py-3 px-4 font-semibold text-gray-700">Default Monthly (AUD)</th>
+                  <th className="text-right py-3 px-4 font-semibold text-gray-700">Override (USD/month)</th>
+                  <th className="text-right py-3 px-4 font-semibold text-gray-700">Annual</th>
+                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.data_source_breakdown.map((item, idx) => (
+                  <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
+                    <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
+                    <td className="py-3 px-4">
+                      <input
+                        type="number"
+                        min="0"
+                        step="100"
+                        placeholder="Enter USD amount"
+                        value={manualPricing.dataSources[item.subcategory] || ''}
+                        onChange={(e) => handleDataSourcePriceChange(item.subcategory, e.target.value)}
+                        className="w-full px-2 py-1 border border-gray-300 rounded text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </td>
+                    <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
+                    <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
+                  </tr>
+                ))}
+                <tr className="bg-green-50 font-bold">
+                  <td className="py-3 px-4 text-gray-900">Total Data Sources</td>
+                  <td className="py-3 px-4 text-right text-green-900">{formatCurrency(results.data_source_costs)}</td>
+                  <td className="py-3 px-4 text-center text-xs text-gray-500">Manual overrides above</td>
+                  <td className="py-3 px-4 text-right text-green-900">{formatCurrency(results.data_source_costs * 12)}</td>
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-gray-500">No premium data sources for this agent</p>
+        )}
+      </div>
+    );
+  };
+
+  const MonitoringTab = () => {
+    const handleMonitoringPriceChange = (serviceName, value) => {
+      setManualPricing(prev => ({
+        ...prev,
+        monitoring: {
+          ...prev.monitoring,
+          [serviceName]: parseFloat(value) || 0
+        }
+      }));
+    };
+
+    return (
+      <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold text-gray-800">Monitoring & Observability</h3>
+          <div className="text-xs text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+            Manual Pricing Override Enabled
+          </div>
+        </div>
+
+        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <p className="text-sm text-yellow-800">
+            <strong>💡 Manual Pricing:</strong> You can override the default pricing for monitoring services below.
+            Enter your actual monthly costs in AUD.
+          </p>
+        </div>
+
+        {results && results.monitoring_breakdown && results.monitoring_breakdown.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b-2 border-gray-200">
+                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Service</th>
+                  <th className="text-right py-3 px-4 font-semibold text-gray-700">Quantity</th>
+                  <th className="text-right py-3 px-4 font-semibold text-gray-700">Default Monthly (AUD)</th>
+                  <th className="text-right py-3 px-4 font-semibold text-gray-700">Override (AUD/month)</th>
+                  <th className="text-right py-3 px-4 font-semibold text-gray-700">Annual</th>
+                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.monitoring_breakdown.map((item, idx) => (
+                  <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
+                    <td className="py-3 px-4 text-right text-gray-600">{item.quantity.toFixed(0)} {item.unit}</td>
+                    <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
+                    <td className="py-3 px-4">
+                      <input
+                        type="number"
+                        min="0"
+                        step="10"
+                        placeholder="Enter AUD amount"
+                        value={manualPricing.monitoring[item.subcategory] || ''}
+                        onChange={(e) => handleMonitoringPriceChange(item.subcategory, e.target.value)}
+                        className="w-full px-2 py-1 border border-gray-300 rounded text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </td>
+                    <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
+                    <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
+                  </tr>
+                ))}
+                <tr className="bg-orange-50 font-bold">
+                  <td className="py-3 px-4 text-gray-900" colSpan="2">Total Monitoring</td>
+                  <td className="py-3 px-4 text-right text-orange-900">{formatCurrency(results.monitoring_costs)}</td>
+                  <td className="py-3 px-4 text-center text-xs text-gray-500">Manual overrides above</td>
+                  <td className="py-3 px-4 text-right text-orange-900">{formatCurrency(results.monitoring_costs * 12)}</td>
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-gray-500">No monitoring data available</p>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
@@ -450,7 +546,29 @@ const CostCalculator = () => {
 
         {/* Agent Selector */}
         <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200 mb-6">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">Select AI Agent</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-gray-800">Select AI Agent</h2>
+            {salesCoachConfig.lastUpdated && (
+              <button
+                onClick={loadSalesCoachConfig}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-md"
+                title="Load usage parameters from Sales Coach configuration (preserves selected agent)"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Load Sales Coach Parameters
+              </button>
+            )}
+          </div>
+          {salesCoachConfig.lastUpdated && (
+            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+              <p className="text-sm text-green-800">
+                <strong>✓ Sales Coach configuration available</strong> - Last updated: {new Date(salesCoachConfig.lastUpdated).toLocaleString()}
+              </p>
+              <p className="text-xs text-green-700 mt-1">
+                Click "Load Sales Coach Parameters" to use parameters from your Sales Coach setup for ANY selected agent ({salesCoachConfig.globalParams.num_users} users, {salesCoachConfig.globalParams.assessments_per_user_per_month} queries/month)
+              </p>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {availableAgents.map((agent) => (
               <button

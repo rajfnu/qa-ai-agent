@@ -2,8 +2,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional
 from enum import Enum
-
 router = APIRouter()
+
+# Pricing configuration is now embedded in this file
 
 # ===========================
 # AI AGENT DEFINITIONS
@@ -285,6 +286,15 @@ class CostCalculatorRequest(BaseModel):
     use_prompt_caching: bool = Field(default=True)
     use_reserved_instances: bool = Field(default=True)
 
+    # Memory System Selection (THIS ADDRESSES USER'S QUESTION)
+    memory_type: str = Field(default="redis", description="Memory system: redis, cosmos_db, neo4j, in_memory")
+
+    # MCP Tools Selection (THIS ADDRESSES USER'S QUESTION)
+    selected_tools: List[str] = Field(
+        default=[],
+        description="List of selected MCP tool names (e.g., ['research_tool', 'fog_analysis_tool'])"
+    )
+
     # Optional: Override infrastructure (if not provided, uses agent defaults)
     custom_infrastructure: Optional[Dict[str, int]] = None
 
@@ -332,12 +342,16 @@ class CostCalculatorResponse(BaseModel):
     llm_costs: float
     data_source_costs: float
     monitoring_costs: float
+    memory_system_costs: float  # NEW - addresses user's question
+    mcp_tools_costs: float      # NEW - addresses user's question
 
     # Detailed Breakdown by Tab
     infrastructure_breakdown: List[CostBreakdown]
     llm_breakdown: List[CostBreakdown]
     data_source_breakdown: List[CostBreakdown]
     monitoring_breakdown: List[CostBreakdown]
+    memory_system_breakdown: List[CostBreakdown]  # NEW
+    mcp_tools_breakdown: List[CostBreakdown]      # NEW
 
     # Metrics
     queries_per_month: int
@@ -563,15 +577,16 @@ def calculate_llm_costs(
         model_input_tokens = (percentage / 100.0) * total_input_tokens
         model_output_tokens = (percentage / 100.0) * total_output_tokens
 
+        # Get pricing from LLM_PRICING_USD
         if model not in LLM_PRICING_USD:
             continue
-
-        pricing = LLM_PRICING_USD[model]
+            
+        llm_pricing = LLM_PRICING_USD[model]
 
         # Handle Llama (self-hosted)
         if "llama" in model.lower():
-            monthly_cost = pricing["infrastructure_monthly"]
-            total += monthly_cost
+            # For Llama, infrastructure cost is included in GPU nodes
+            monthly_cost = 0.0  # No additional LLM API cost
             breakdown.append(CostBreakdown(
                 category="LLM",
                 subcategory=f"{model} (Self-Hosted)",
@@ -583,6 +598,11 @@ def calculate_llm_costs(
             ))
             continue
 
+        # Get pricing (USD per 1M tokens)
+        input_price = llm_pricing.get('input', 0.0)
+        output_price = llm_pricing.get('output', 0.0)
+        cache_price = llm_pricing.get('cache_read', 0.0)
+
         # Calculate with caching
         if use_caching and cache_hit_rate > 0:
             # Cached reads
@@ -590,20 +610,20 @@ def calculate_llm_costs(
             uncached_input_tokens = model_input_tokens * (1 - cache_hit_rate)
 
             # Cost calculation (convert to millions)
-            cached_input_cost = (cached_input_tokens / 1_000_000) * pricing["cache_read"]
-            uncached_input_cost = (uncached_input_tokens / 1_000_000) * pricing["input"]
-            output_cost = (model_output_tokens / 1_000_000) * pricing["output"]
+            cached_input_cost = (cached_input_tokens / 1_000_000) * cache_price
+            uncached_input_cost = (uncached_input_tokens / 1_000_000) * input_price
+            output_cost = (model_output_tokens / 1_000_000) * output_price
 
             monthly_cost_usd = cached_input_cost + uncached_input_cost + output_cost
 
             # Calculate savings
-            full_price_input = (model_input_tokens / 1_000_000) * pricing["input"]
+            full_price_input = (model_input_tokens / 1_000_000) * input_price
             current_input = cached_input_cost + uncached_input_cost
             savings += (full_price_input - current_input)
         else:
             # No caching
-            input_cost = (model_input_tokens / 1_000_000) * pricing["input"]
-            output_cost = (model_output_tokens / 1_000_000) * pricing["output"]
+            input_cost = (model_input_tokens / 1_000_000) * input_price
+            output_cost = (model_output_tokens / 1_000_000) * output_price
             monthly_cost_usd = input_cost + output_cost
 
         # Convert to AUD
@@ -632,39 +652,40 @@ def calculate_data_source_costs(agent_type: str) -> tuple[float, List[CostBreakd
     agent = AI_AGENTS[agent_type]
     data_sources = agent["data_sources"]
 
-    # Map data source names to pricing (updated for SCIP v2.1)
+    # Map data source names to pricing config names
     source_mapping = {
-        "ZoomInfo (Premium)": "zoominfo",
-        "ZoomInfo": "zoominfo",
-        "LinkedIn Sales Navigator (Premium)": "linkedin_sales_navigator",
-        "LinkedIn Sales Navigator": "linkedin_sales_navigator",
-        "Clearbit (Premium)": "clearbit",
-        "Clearbit": "clearbit",
-        "HubSpot/Salesforce CRM (Data Sync only, no UI)": "hubspot_enterprise",
-        "HubSpot/Salesforce CRM": "hubspot_enterprise",
-        "News APIs": "news_apis",
-        "Social Media APIs": "social_media_apis",
-        "Company Data APIs": "company_data_apis"
+        "ZoomInfo (Premium)": "ZoomInfo",
+        "ZoomInfo": "ZoomInfo",
+        "LinkedIn Sales Navigator (Premium)": "LinkedIn Sales Navigator",
+        "LinkedIn Sales Navigator": "LinkedIn Sales Navigator",
+        "Clearbit (Premium)": "Clearbit",
+        "Clearbit": "Clearbit",
+        "HubSpot/Salesforce CRM (Data Sync only, no UI)": "HubSpot/Salesforce CRM",
+        "HubSpot/Salesforce CRM": "HubSpot/Salesforce CRM",
+        "News APIs": "News APIs",
+        "Social Media APIs": "Social Media APIs",
+        "Company Data APIs": "Company Data APIs"
     }
 
     for source in data_sources:
-        pricing_key = source_mapping.get(source)
-        if pricing_key and pricing_key in DATA_SOURCE_PRICING_USD:
-            monthly_cost_usd = DATA_SOURCE_PRICING_USD[pricing_key]
-            if monthly_cost_usd == 0:
-                # Skip zero-cost items (like CRM data sync)
-                continue
-            monthly_cost = monthly_cost_usd / AUD_TO_USD
-            total += monthly_cost
-            breakdown.append(CostBreakdown(
-                category="Data Sources",
-                subcategory=source,
-                monthly_cost=monthly_cost,
-                annual_cost=monthly_cost * 12,
-                unit="subscription",
-                quantity=1,
-                notes=f"Enterprise tier subscription"
-            ))
+        mapped_name = source_mapping.get(source, source)
+        monthly_cost_usd = DATA_SOURCE_PRICING_USD.get(mapped_name, 0)
+
+        if monthly_cost_usd == 0:
+            # Skip zero-cost items (like CRM data sync)
+            continue
+
+        monthly_cost = monthly_cost_usd / AUD_TO_USD
+        total += monthly_cost
+        breakdown.append(CostBreakdown(
+            category="Data Sources",
+            subcategory=source,
+            monthly_cost=monthly_cost,
+            annual_cost=monthly_cost * 12,
+            unit="subscription",
+            quantity=1,
+            notes=f"Enterprise tier subscription"
+        ))
 
     return total, breakdown
 
@@ -700,8 +721,8 @@ def calculate_monitoring_costs(data_ingestion_gb: float) -> tuple[float, List[Co
         notes="APM and telemetry"
     ))
 
-    # Grafana/Prometheus (self-hosted)
-    grafana_cost = 500  # Estimated monthly cost
+    # Grafana/Prometheus (self-hosted) - Estimated cost
+    grafana_cost = 500.0  # Estimated monthly cost for self-hosted monitoring
     total += grafana_cost
     breakdown.append(CostBreakdown(
         category="Monitoring",
@@ -714,6 +735,76 @@ def calculate_monitoring_costs(data_ingestion_gb: float) -> tuple[float, List[Co
     ))
 
     return total, breakdown
+
+
+def calculate_memory_system_costs(memory_type: str, capacity_gb: float = 6) -> tuple[float, List[CostBreakdown]]:
+    """
+    Calculate memory system costs based on user selection
+    THIS ADDRESSES USER'S QUESTION: Memory selection now affects costs!
+    """
+    breakdown = []
+
+    # Calculate monthly cost based on memory type
+    if memory_type == "redis":
+        monthly_cost = AZURE_PRICING_SYDNEY["database"]["redis_c6"] * 730
+    elif memory_type == "cosmos_db":
+        monthly_cost = AZURE_PRICING_SYDNEY["database"]["cosmosdb_ru_100"] * (45000 / 100) * 730
+    elif memory_type == "neo4j":
+        neo4j_vm = AZURE_PRICING_SYDNEY["compute"]["Standard_D16s_v5"]
+        monthly_cost = neo4j_vm["payg"] * 730 * 2  # 2 nodes
+    else:  # in_memory
+        monthly_cost = 0.0
+
+    if monthly_cost > 0:
+        breakdown.append(CostBreakdown(
+            category="Memory System",
+            subcategory=f"{memory_type.replace('_', ' ').title()}",
+            monthly_cost=monthly_cost,
+            annual_cost=monthly_cost * 12,
+            unit="system",
+            quantity=1,
+            notes=f"Selected memory system: {memory_type}"
+        ))
+
+    return monthly_cost, breakdown
+
+
+def calculate_mcp_tools_costs(selected_tools: List[str], num_assessments: int = 4000) -> tuple[float, List[CostBreakdown]]:
+    """
+    Calculate MCP tools costs based on user selection
+    THIS ADDRESSES USER'S QUESTION: Tools selection now affects costs!
+    """
+    breakdown = []
+
+    # Calculate total monthly cost for MCP tools
+    total_cost = 0.0
+    
+    # Simple pricing for MCP tools (estimated)
+    mcp_tool_pricing = {
+        "CRM Integration": 200.0,  # Monthly cost for CRM sync
+        "Email Integration": 150.0,  # Monthly cost for email parsing
+        "Calendar Integration": 100.0,  # Monthly cost for calendar sync
+        "Document Analysis": 300.0,  # Monthly cost for document processing
+        "Web Search": 50.0,  # Monthly cost for web search APIs
+        "Data Enrichment": 400.0,  # Monthly cost for data enrichment
+    }
+
+    if selected_tools:
+        for tool_name in selected_tools:
+            tool_cost = mcp_tool_pricing.get(tool_name, 0.0)
+            total_cost += tool_cost
+            
+            breakdown.append(CostBreakdown(
+                category="MCP Tools",
+                subcategory=tool_name,
+                monthly_cost=tool_cost,
+                annual_cost=tool_cost * 12,
+                unit="service",
+                quantity=1,
+                notes=f"Monthly subscription for {tool_name}"
+            ))
+
+    return total_cost, breakdown
 
 
 # ===========================
@@ -759,8 +850,22 @@ async def calculate_costs(params: CostCalculatorRequest):
     estimated_data_gb = (params.num_users * params.queries_per_user_per_month * 0.001) + 100  # Base 100GB
     monitor_total, monitor_breakdown = calculate_monitoring_costs(estimated_data_gb)
 
-    # Calculate totals
-    fixed_monthly = infra_total + data_total + monitor_total
+    # Calculate MEMORY SYSTEM costs (NEW - addresses user's question)
+    memory_total, memory_breakdown = calculate_memory_system_costs(
+        memory_type=params.memory_type,
+        capacity_gb=6.0  # Default capacity
+    )
+
+    # Calculate MCP TOOLS costs (NEW - addresses user's question)
+    # Calculate number of assessments/queries for tools cost
+    total_queries = params.num_users * params.queries_per_user_per_month
+    tools_total, tools_breakdown = calculate_mcp_tools_costs(
+        selected_tools=params.selected_tools,
+        num_assessments=total_queries
+    )
+
+    # Calculate totals (INCLUDING new memory and tools costs)
+    fixed_monthly = infra_total + data_total + monitor_total + memory_total + tools_total
     variable_monthly = llm_total
     total_monthly = fixed_monthly + variable_monthly
     total_annual = total_monthly * 12
@@ -807,10 +912,14 @@ async def calculate_costs(params: CostCalculatorRequest):
         llm_costs=llm_total,
         data_source_costs=data_total,
         monitoring_costs=monitor_total,
+        memory_system_costs=memory_total,  # NEW - memory costs impact!
+        mcp_tools_costs=tools_total,       # NEW - tools costs impact!
         infrastructure_breakdown=infra_breakdown,
         llm_breakdown=llm_breakdown,
         data_source_breakdown=data_breakdown,
         monitoring_breakdown=monitor_breakdown,
+        memory_system_breakdown=memory_breakdown,  # NEW
+        mcp_tools_breakdown=tools_breakdown,       # NEW
         queries_per_month=total_queries,
         input_tokens_per_month=total_input_tokens,
         output_tokens_per_month=total_output_tokens,

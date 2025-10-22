@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Briefcase, Settings, Zap, DollarSign, Database, Cpu, Brain, Users, TrendingUp, Target, Shield, Lightbulb, MessageSquare } from 'lucide-react';
+import { Briefcase, Settings, Zap, DollarSign, Database, Cpu, Brain, Users, TrendingUp, Target, Shield, MessageSquare, Info, X, Lightbulb } from 'lucide-react';
+import { useAppContext } from './AppContext';
 
 // OPTIMIZED SCIP AGENT CONFIGURATION (Based on Tech_Design_Sales_Coach_AI_Agent_OPTIMIZED.md)
 const SCIP_AGENTS = {
@@ -195,6 +196,9 @@ const SCIP_AGENTS = {
 };
 
 const SalesCoach = () => {
+  // Get context for sharing config with other tabs
+  const { updateSalesCoachConfig } = useAppContext();
+
   const [activeAgent, setActiveAgent] = useState('supervisor');
   const [agentConfigs, setAgentConfigs] = useState(() => {
     // Initialize with default configs
@@ -208,9 +212,16 @@ const SalesCoach = () => {
   // Global parameters
   const [globalParams, setGlobalParams] = useState({
     num_users: 100,
-    assessments_per_user_per_month: 40, // 10 deals x 4 assessments each
-    avg_deal_size: 500000 // $500K average deal size
+    assessments_per_user_per_month: 40 // 10 deals x 4 assessments each
   });
+
+  // Popup state for info modal
+  const [showInfoPopup, setShowInfoPopup] = useState(false);
+
+  // Sync configuration changes to AppContext (for Cost Calculator)
+  useEffect(() => {
+    updateSalesCoachConfig(globalParams, agentConfigs);
+  }, [globalParams, agentConfigs, updateSalesCoachConfig]);
 
   const currentAgent = SCIP_AGENTS[activeAgent];
   const currentConfig = agentConfigs[activeAgent];
@@ -286,8 +297,15 @@ const SalesCoach = () => {
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
             <Settings className="w-5 h-5 mr-2 text-indigo-600" />
             Global Usage Parameters
+            <button
+              onClick={() => setShowInfoPopup(true)}
+              className="ml-2 p-1 hover:bg-indigo-100 rounded-full transition-colors"
+              title="Learn how these parameters affect cost"
+            >
+              <Info className="w-5 h-5 text-indigo-600" />
+            </button>
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Number of Users: {globalParams.num_users}
@@ -301,6 +319,7 @@ const SalesCoach = () => {
                 onChange={(e) => handleGlobalParamChange('num_users', parseInt(e.target.value))}
                 className="w-full"
               />
+              <p className="text-xs text-gray-500 mt-1">Sales team members using the system</p>
             </div>
 
             <div>
@@ -318,23 +337,155 @@ const SalesCoach = () => {
               />
               <p className="text-xs text-gray-500 mt-1">Typical: 10 deals × 4 assessments = 40/month</p>
             </div>
+          </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Avg Deal Size: ${(globalParams.avg_deal_size / 1000).toFixed(0)}K
-              </label>
-              <input
-                type="range"
-                min="100000"
-                max="5000000"
-                step="100000"
-                value={globalParams.avg_deal_size}
-                onChange={(e) => handleGlobalParamChange('avg_deal_size', parseInt(e.target.value))}
-                className="w-full"
-              />
+          {/* Total Requests Display */}
+          <div className="mt-4 p-3 bg-indigo-50 rounded-lg border border-indigo-200">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-indigo-900">
+                Total System Load:
+              </span>
+              <span className="text-lg font-bold text-indigo-700">
+                {(globalParams.num_users * globalParams.assessments_per_user_per_month).toLocaleString()} assessments/month
+              </span>
             </div>
           </div>
         </div>
+
+        {/* Info Popup Modal */}
+        {showInfoPopup && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+              {/* Header */}
+              <div className="sticky top-0 bg-gradient-to-r from-indigo-600 to-blue-600 text-white p-6 rounded-t-2xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <Info className="w-8 h-8" />
+                    <h3 className="text-2xl font-bold">How Global Parameters Impact Costs</h3>
+                  </div>
+                  <button
+                    onClick={() => setShowInfoPopup(false)}
+                    className="p-2 hover:bg-white/20 rounded-full transition-colors"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="p-6 space-y-6">
+                {/* Overview */}
+                <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                  <h4 className="font-bold text-blue-900 mb-2 flex items-center">
+                    <DollarSign className="w-5 h-5 mr-2" />
+                    Cost Calculation Formula
+                  </h4>
+                  <div className="text-sm text-blue-800 font-mono bg-white p-3 rounded border border-blue-300">
+                    Total Requests = num_users × assessments_per_user_per_month
+                  </div>
+                  <p className="text-sm text-blue-800 mt-2">
+                    Example: 100 users × 40 assessments = <strong>4,000 total requests/month</strong>
+                  </p>
+                </div>
+
+                {/* Parameters Explanation */}
+                <div className="space-y-4">
+                  <h4 className="font-bold text-gray-900 text-lg">Parameter Details:</h4>
+
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-start space-x-3">
+                      <Users className="w-6 h-6 text-indigo-600 flex-shrink-0 mt-1" />
+                      <div>
+                        <h5 className="font-semibold text-gray-900">Number of Users</h5>
+                        <p className="text-sm text-gray-600 mt-1">
+                          Total sales team members using Sales Coach in the Pocket concurrently.
+                        </p>
+                        <p className="text-sm text-indigo-700 mt-2 font-medium">
+                          Impact: Scales LLM costs linearly (2x users = 2x LLM costs)
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-start space-x-3">
+                      <Target className="w-6 h-6 text-indigo-600 flex-shrink-0 mt-1" />
+                      <div>
+                        <h5 className="font-semibold text-gray-900">Assessments per User/Month</h5>
+                        <p className="text-sm text-gray-600 mt-1">
+                          How many 4Cs (Right-to-Win) assessments each user performs monthly.
+                          Typical: 10 deals × 4 assessments per deal = 40 assessments.
+                        </p>
+                        <p className="text-sm text-indigo-700 mt-2 font-medium">
+                          Impact: Scales LLM costs linearly (2x assessments = 2x LLM costs)
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* How It Works */}
+                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                  <h4 className="font-bold text-gray-900 mb-3">How Costs Are Calculated:</h4>
+                  <div className="space-y-3 text-sm text-gray-700">
+                    <div className="flex items-start space-x-2">
+                      <span className="font-bold text-indigo-600 flex-shrink-0">1.</span>
+                      <p><strong>Total requests</strong> are calculated using the formula above</p>
+                    </div>
+                    <div className="flex items-start space-x-2">
+                      <span className="font-bold text-indigo-600 flex-shrink-0">2.</span>
+                      <p>Each <strong>agent</strong> uses these requests based on its <strong>usage probability</strong> and <strong>requests per assessment</strong></p>
+                    </div>
+                    <div className="flex items-start space-x-2">
+                      <span className="font-bold text-indigo-600 flex-shrink-0">3.</span>
+                      <p><strong>LLM API costs</strong> scale with token consumption (agent requests × tokens per request)</p>
+                    </div>
+                    <div className="flex items-start space-x-2">
+                      <span className="font-bold text-indigo-600 flex-shrink-0">4.</span>
+                      <p><strong>Infrastructure costs</strong> are mostly fixed (~$17K/month) but storage scales slightly</p>
+                    </div>
+                    <div className="flex items-start space-x-2">
+                      <span className="font-bold text-indigo-600 flex-shrink-0">5.</span>
+                      <p><strong>Data source costs</strong> are fixed subscriptions (~$57K/month for ZoomInfo, LinkedIn, etc.)</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Example */}
+                <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                  <h4 className="font-bold text-green-900 mb-2 flex items-center">
+                    <Zap className="w-5 h-5 mr-2" />
+                    Real Example from Testing
+                  </h4>
+                  <div className="space-y-2 text-sm text-green-800">
+                    <div className="flex justify-between">
+                      <span>50 users × 40 assessments =</span>
+                      <strong>2,000 requests → $75,377/month</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>200 users × 40 assessments =</span>
+                      <strong>8,000 requests → $75,626/month</strong>
+                    </div>
+                    <p className="mt-3 pt-3 border-t border-green-300">
+                      💡 <strong>Key Insight:</strong> 4x users = only 0.3% increase in total cost because
+                      infrastructure ($17K) and data sources ($57K) are fixed. LLM costs ($73 → $290) scale but are small compared to fixed costs.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Close Button */}
+                <div className="flex justify-end pt-4 border-t border-gray-200">
+                  <button
+                    onClick={() => setShowInfoPopup(false)}
+                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium"
+                  >
+                    Got It
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Agent Tabs */}
         <div className="bg-white rounded-xl shadow-lg border border-gray-200 mb-6">

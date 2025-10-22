@@ -9,7 +9,12 @@
       "Bash(source venv/bin/activate)",
       "Bash(uvicorn:*)",
       "Bash(lsof:*)",
-      "Bash(npm start)"
+      "Bash(npm start)",
+      "Bash(pip install:*)",
+      "Bash(cat:*)",
+      "Bash(chmod:*)",
+      "Bash(/tmp/comprehensive_test_suite.sh)",
+      "Bash(bash:*)"
     ],
     "deny": [],
     "ask": []
