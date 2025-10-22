@@ -262,7 +262,7 @@ class CostCalculatorRequest(BaseModel):
 
     # User Parameters
     num_users: int = Field(default=100, ge=1, le=10000)
-    queries_per_user_per_month: int = Field(default=1000, ge=100, le=10000)
+    queries_per_user_per_month: int = Field(default=1000, ge=10, le=10000)  # Lowered from 100 to 10 for Sales Coach assessments
     avg_input_tokens: int = Field(default=10000, ge=1000, le=100000)
     avg_output_tokens: int = Field(default=1000, ge=100, le=10000)
 

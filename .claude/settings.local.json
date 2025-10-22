@@ -5,7 +5,11 @@
       "Bash(curl:*)",
       "Bash(npm install)",
       "WebSearch",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(source venv/bin/activate)",
+      "Bash(uvicorn:*)",
+      "Bash(lsof:*)",
+      "Bash(npm start)"
     ],
     "deny": [],
     "ask": []
