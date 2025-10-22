@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Briefcase, Settings, Zap, DollarSign, Database, Cpu, Brain, Users, TrendingUp, Target, Shield } from 'lucide-react';
+import { Briefcase, Settings, Zap, DollarSign, Database, Cpu, Brain, Users, TrendingUp, Target, Shield, Lightbulb, MessageSquare } from 'lucide-react';
 
 // OPTIMIZED SCIP AGENT CONFIGURATION (Based on Tech_Design_Sales_Coach_AI_Agent_OPTIMIZED.md)
 const SCIP_AGENTS = {
@@ -129,6 +129,48 @@ const SCIP_AGENTS = {
     toolsOptions: ['research_tool', 'license_to_sell_tool'],
     memoryOptions: ['cosmos-db', 'azure-sql']
   },
+  persona_coach: {
+    id: 'persona_coach',
+    name: 'Persona-Coach Agent (NBM)',
+    icon: Lightbulb,
+    description: 'CRITICAL: Generates Next-Best-Move recommendations based on 4Cs gaps and deal context',
+    category: 'Core',
+    defaultConfig: {
+      llm: 'gpt-4o',
+      temperature: 0.7,
+      max_tokens: 4000,
+      memory_type: 'cosmos-db',
+      memory_window: 20,
+      tools: ['research_tool', 'engagement_excellence_tool', 'impact_theme_generator_tool', 'fog_analysis_tool', 'content_generation_tool'],
+      usage_probability: 100, // Always used - this is the main value proposition!
+      avg_tokens_per_request: 5000,
+      requests_per_4cs_calculation: 2 // Called after 4Cs to generate actions
+    },
+    llmOptions: ['gpt-4o', 'claude-3.5-opus', 'claude-3.5-sonnet', 'gpt-4-turbo'],
+    toolsOptions: ['research_tool', 'engagement_excellence_tool', 'impact_theme_generator_tool', 'fog_analysis_tool', 'content_generation_tool', 'competitive_intel_tool'],
+    memoryOptions: ['cosmos-db', 'redis', 'azure-sql']
+  },
+  feedback_agent: {
+    id: 'feedback_agent',
+    name: 'Feedback Agent',
+    icon: MessageSquare,
+    description: 'Processes post-meeting notes, updates 4Cs scores, and tracks R2W delta for continuous learning',
+    category: 'Supporting',
+    defaultConfig: {
+      llm: 'gpt-4o',
+      temperature: 0.5,
+      max_tokens: 3000,
+      memory_type: 'cosmos-db',
+      memory_window: 30,
+      tools: ['fog_analysis_tool', 'research_tool'],
+      usage_probability: 80, // Used after meetings/interactions
+      avg_tokens_per_request: 4000,
+      requests_per_4cs_calculation: 1 // Called when feedback is provided
+    },
+    llmOptions: ['gpt-4o', 'claude-3.5-sonnet', 'gpt-4-turbo'],
+    toolsOptions: ['fog_analysis_tool', 'research_tool', 'engagement_excellence_tool'],
+    memoryOptions: ['cosmos-db', 'azure-sql', 'redis']
+  },
   realtime_coach: {
     id: 'realtime_coach',
     name: 'Real-time Coach Agent',
@@ -235,7 +277,7 @@ const SalesCoach = () => {
             <h1 className="text-4xl font-bold text-gray-900">Sales Coach in the Pocket</h1>
           </div>
           <p className="text-gray-600">
-            Configure the 6-7 optimized AI agents for ImpactWon 4Cs assessment • Lean Agents + Rich Tools Architecture
+            Configure the 9 optimized AI agents for ImpactWon 4Cs assessment • Lean Agents + Rich Tools Architecture
           </p>
         </div>
 
@@ -547,15 +589,15 @@ const SalesCoach = () => {
             <div>
               <h4 className="font-semibold text-gray-800 mb-2">Lean Agents + Rich Tools</h4>
               <p>
-                Reduced from 21 agents to 6-7 optimized agents following AI best practices.
+                Reduced from 21 agents to 9 optimized agents following AI best practices.
                 Complex reasoning stays in agents; data retrieval and templates moved to MCP tools.
               </p>
             </div>
             <div>
-              <h4 className="font-semibold text-gray-800 mb-2">Cost Savings</h4>
+              <h4 className="font-semibold text-gray-800 mb-2">Cost Savings & Impact</h4>
               <p>
-                70% reduction in agents = 57% cost savings ($15K → $6.5K/month) with 50-60% faster response times.
-                Each agent configuration directly impacts the Cost Calculator.
+                57% reduction in agents = 57% cost savings with 50-60% faster response times.
+                Every agent configuration (LLM, tokens, usage probability) directly impacts the Cost Calculator.
               </p>
             </div>
           </div>

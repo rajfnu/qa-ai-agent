@@ -12,8 +12,8 @@ router = APIRouter()
 AI_AGENTS = {
     "sales-coach": {
         "name": "Sales Coach in the Pocket (SCIP) - OPTIMIZED v2.1",
-        "description": "Lean 6-7 agent architecture following ImpactWon methodology for 4Cs assessment. 70% fewer agents, 57% cost savings vs v2.0",
-        "agents_count": 7,
+        "description": "Lean 9-agent architecture following ImpactWon methodology for 4Cs assessment + Next-Best-Move generation. Optimized from 21 agents, 57% cost savings vs v2.0",
+        "agents_count": 9,
         "agents": [
             "Supervisor Agent",
             "Power Plan Agent (4Cs) - CRITICAL",
@@ -21,6 +21,8 @@ AI_AGENTS = {
             "Client Intelligence Agent (Profiling+BBB+Right Clients)",
             "Deal Assessment Agent (Right Deals+Find Money+Risk)",
             "Team Orchestration Agent (Team Plan+Right Team)",
+            "Persona-Coach Agent (NBM) - CRITICAL",
+            "Feedback Agent",
             "Real-time Coach Agent (OPTIONAL)"
         ],
         "mcp_tools": [
