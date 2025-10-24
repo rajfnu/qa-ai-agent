@@ -21,21 +21,23 @@ export const AppProvider = ({ children }) => {
       assessments_per_user_per_month: 40
     },
     agentConfigs: {}, // Will be populated by SalesCoach component
+    agentCosts: {}, // Individual agent LLM costs
     lastUpdated: null
   });
 
   // Function to update Sales Coach config from SalesCoach tab
-  const updateSalesCoachConfig = (globalParams, agentConfigs) => {
+  const updateSalesCoachConfig = (globalParams, agentConfigs, agentCosts = {}) => {
     setSalesCoachConfig({
       globalParams,
       agentConfigs,
+      agentCosts,
       lastUpdated: new Date().toISOString()
     });
   };
 
   // Function to convert Sales Coach config to Cost Calculator format
   const getSalesCoachCostParams = () => {
-    const { globalParams, agentConfigs } = salesCoachConfig;
+    const { globalParams, agentConfigs, agentCosts } = salesCoachConfig;
 
     // Calculate total queries (assessments in this case)
     const queries_per_user_per_month = globalParams.assessments_per_user_per_month || 40;
@@ -97,6 +99,14 @@ export const AppProvider = ({ children }) => {
       );
     }
 
+    // Calculate total LLM cost by summing weighted agent costs
+    let totalAgentLLMCost = 0;
+    Object.entries(agentConfigs).forEach(([agentId, config]) => {
+      const agentCost = agentCosts[agentId] || 0;
+      const probability = (config.usage_probability || 0) / 100;
+      totalAgentLLMCost += agentCost * probability;
+    });
+
     return {
       // NOTE: agent_type is NOT included here - it will be preserved by the merge in CostCalculator
       num_users: globalParams.num_users || 100,
@@ -108,7 +118,8 @@ export const AppProvider = ({ children }) => {
       infrastructure_scale: 1.0,
       cache_hit_rate: 0.70,
       use_prompt_caching: true,
-      use_reserved_instances: true
+      use_reserved_instances: true,
+      total_agent_llm_cost: totalAgentLLMCost // Sum of all weighted agent LLM costs
     };
   };
 

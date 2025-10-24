@@ -1,375 +1,123 @@
+import sys
+import os
+
+# Add the config directory to the path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'config'))
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional
-from enum import Enum
-router = APIRouter()
+from typing import List, Dict, Optional, Any
+import json
 
-# Pricing configuration is now embedded in this file
+# Import service tier configurations
+from config.service_tiers import (
+    SERVICE_TIERS,
+    LLM_CATEGORIES,
+    get_tier_config,
+    get_llm_models_for_tier,
+    get_tier_summary,
+    calculate_on_premise_cost
+)
 
-# ===========================
-# AI AGENT DEFINITIONS
-# ===========================
+# Load LLM pricing from LLM_Pricing.json
+def load_llm_pricing():
+    """Load LLM pricing from LLM_Pricing.json file"""
+    config_path = os.path.join(os.path.dirname(__file__), '../../config/LLM_Pricing.json')
+    try:
+        with open(config_path, 'r') as f:
+            data = json.load(f)
+            # Flatten the providers structure to model_id: {input, output, ...}
+            pricing = {}
+            for provider, models in data.get('providers', {}).items():
+                for model_id, model_data in models.items():
+                    pricing[model_id] = {
+                        'input': model_data.get('input', 0.0),
+                        'output': model_data.get('output', 0.0),
+                        'cache_read': model_data.get('cachedInput', 0.0)
+                    }
+            return pricing
+    except Exception as e:
+        print(f"Error loading LLM_Pricing.json: {e}")
+        return {}
 
-AI_AGENTS = {
-    "sales-coach": {
-        "name": "Sales Coach in the Pocket (SCIP) - OPTIMIZED v2.1",
-        "description": "Lean 9-agent architecture following ImpactWon methodology for 4Cs assessment + Next-Best-Move generation. Optimized from 21 agents, 57% cost savings vs v2.0",
-        "agents_count": 9,
-        "agents": [
-            "Supervisor Agent",
-            "Power Plan Agent (4Cs) - CRITICAL",
-            "Strategic Planning Agent (CEO+Attainment+Pursuit)",
-            "Client Intelligence Agent (Profiling+BBB+Right Clients)",
-            "Deal Assessment Agent (Right Deals+Find Money+Risk)",
-            "Team Orchestration Agent (Team Plan+Right Team)",
-            "Persona-Coach Agent (NBM) - CRITICAL",
-            "Feedback Agent",
-            "Real-time Coach Agent (OPTIONAL)"
-        ],
-        "mcp_tools": [
-            "research_tool (MCP Server)",
-            "content_generation_tool (MCP Server)",
-            "competitive_intel_tool (MCP Server)",
-            "fog_analysis_tool (Function)",
-            "engagement_excellence_tool (Function)",
-            "impact_theme_generator_tool (Function)",
-            "license_to_sell_tool (Function)",
-            "find_money_validator_tool (Function)"
-        ],
-        "data_buckets": 4,
-        "data_sources": [
-            "ZoomInfo (Premium)",
-            "LinkedIn Sales Navigator (Premium)",
-            "Clearbit (Premium)",
-            "HubSpot/Salesforce CRM (Data Sync only, no UI)",
-            "News APIs",
-            "Social Media APIs"
-        ],
-        "complexity": "medium",  # Reduced from "high" due to optimization
-        "base_infrastructure": {
-            "aks_nodes": 8,  # Reduced from 12 (fewer agents)
-            "gpu_nodes": 0,  # No local LLM hosting, using API-based models
-            "sql_vcores": 12,  # Reduced from 16
-            "cosmos_ru": 45000,  # Reduced from 60000
-            "neo4j_nodes": 2,  # Reduced from 3 (smaller graph)
-            "storage_hot_tb": 15,  # Reduced from 25
-            "storage_cool_tb": 120  # Reduced from 200
-        }
-    },
-    "qa-agent": {
-        "name": "QA AI Agent",
-        "description": "Automated QA test generation, execution, and healing with multi-agent architecture",
-        "agents_count": 5,
-        "agents": ["Perception", "Planner", "Generator", "Execution", "Healer"],
-        "data_buckets": 2,
-        "data_sources": ["Confluence", "GitHub", "Test Results DB"],
-        "complexity": "medium",
-        "base_infrastructure": {
-            "aks_nodes": 8,
-            "gpu_nodes": 2,
-            "sql_vcores": 8,
-            "cosmos_ru": 30000,
-            "neo4j_nodes": 1,
-            "storage_hot_tb": 10,
-            "storage_cool_tb": 50
-        }
-    },
-    "rfp-evaluator": {
-        "name": "RFP Evaluator AI Agent",
-        "description": "Automated RFP/RFI evaluation with document analysis, scoring, and recommendation engine",
-        "agents_count": 6,
-        "agents": ["Document Parser", "Requirements Extractor", "Vendor Analyzer", "Scorer", "Comparator", "Report Generator"],
-        "data_buckets": 3,
-        "data_sources": ["Document Storage", "Vendor DB", "Historical RFPs"],
-        "complexity": "medium-high",
-        "base_infrastructure": {
-            "aks_nodes": 10,
-            "gpu_nodes": 3,
-            "sql_vcores": 12,
-            "cosmos_ru": 40000,
-            "neo4j_nodes": 2,
-            "storage_hot_tb": 15,
-            "storage_cool_tb": 100
-        }
-    },
-    "customer-support": {
-        "name": "Customer Support AI Agent",
-        "description": "Intelligent customer support with ticket routing, response generation, and knowledge base",
-        "agents_count": 5,
-        "agents": ["Ticket Classifier", "Intent Analyzer", "Response Generator", "Knowledge Retriever", "Escalation Manager"],
-        "data_buckets": 3,
-        "data_sources": ["Zendesk/ServiceNow", "Knowledge Base", "Customer DB"],
-        "complexity": "medium",
-        "base_infrastructure": {
-            "aks_nodes": 10,
-            "gpu_nodes": 2,
-            "sql_vcores": 12,
-            "cosmos_ru": 35000,
-            "neo4j_nodes": 1,
-            "storage_hot_tb": 12,
-            "storage_cool_tb": 80
-        }
-    },
-    "content-moderator": {
-        "name": "Content Moderation AI Agent",
-        "description": "AI-powered content moderation with real-time toxicity detection and classification",
-        "agents_count": 4,
-        "agents": ["Content Classifier", "Toxicity Detector", "Image Analyzer", "Decision Engine"],
-        "data_buckets": 2,
-        "data_sources": ["User Content DB", "Moderation Rules"],
-        "complexity": "low-medium",
-        "base_infrastructure": {
-            "aks_nodes": 6,
-            "gpu_nodes": 2,
-            "sql_vcores": 8,
-            "cosmos_ru": 25000,
-            "neo4j_nodes": 1,
-            "storage_hot_tb": 8,
-            "storage_cool_tb": 40
-        }
-    }
-}
+# Load pricing on module import
+LLM_PRICING_USD = load_llm_pricing()
 
 # ===========================
-# AZURE AUSTRALIA EAST (SYDNEY) PRICING - 2025
-# All prices in AUD
+# PRICING CONFIGURATION
 # ===========================
 
+# Azure Pricing (AUD) - Sydney Region - January 2025
+# Source: Azure Pricing Calculator
 AZURE_PRICING_SYDNEY = {
     "compute": {
-        # VM Pricing (per hour) - Standard D-series v5
-        "Standard_D4s_v5": {"payg": 0.288, "reserved_1yr": 0.173},  # 4 vCPU, 16 GB
-        "Standard_D8s_v5": {"payg": 0.576, "reserved_1yr": 0.346},  # 8 vCPU, 32 GB
-        "Standard_D16s_v5": {"payg": 1.152, "reserved_1yr": 0.691},  # 16 vCPU, 64 GB
-        # GPU VM Pricing (per hour) - NC-series v3
-        "Standard_NC6s_v3": {"payg": 4.20, "reserved_1yr": 2.52},  # 6 vCPU, 112 GB, 1x V100
-        "Standard_NC12s_v3": {"payg": 8.40, "reserved_1yr": 5.04},  # 12 vCPU, 224 GB, 2x V100
-    },
-    "kubernetes": {
-        "aks_management": 0.15,  # per cluster hour
-        "load_balancer": 30.00,  # per month
-    },
-    "storage": {
-        "adls_gen2_hot": 0.025,  # per GB/month
-        "adls_gen2_cool": 0.015,  # per GB/month
-        "blob_storage_hot": 0.0234,  # per GB/month
-        "blob_storage_cool": 0.0128,  # per GB/month
+        "Standard_D16s_v5": {
+            "payg": 1.44,  # per hour
+            "reserved_1yr": 0.72,  # 50% discount
+            "reserved_3yr": 0.58   # 60% discount
+        },
+        "Standard_NC6s_v3": {  # GPU node
+            "payg": 3.06,  # per hour
+            "reserved_1yr": 1.53,  # 50% discount
+            "reserved_3yr": 1.22   # 60% discount
+        }
     },
     "database": {
-        # Azure SQL Database - vCore model (per vCore per hour)
-        "sql_gen5_vcore": 0.5865,  # General Purpose, Gen5
-        # Cosmos DB (per 100 RU/s per hour)
-        "cosmosdb_ru_100": 0.012,  # Standard throughput
-        # Redis Cache (per hour)
-        "redis_c6": 0.765,  # 6 GB cache
+        "cosmosdb_ru_100": 0.008,  # per 100 RU/s per hour
+        "redis_c6": 0.192,  # per hour
+        "sql_standard": 0.192  # per vCore per hour
     },
-    "networking": {
-        "api_management_developer": 56.00,  # per month
-        "api_management_standard": 785.00,  # per month
-        "application_gateway_v2": 0.315,  # per hour
-        "front_door_standard": 35.00,  # per month (base)
-        "firewall": 1.575,  # per hour
+    "storage": {
+        "hot_lrs": 0.04,  # per GB per month
+        "cool_lrs": 0.01,  # per GB per month
+        "archive_lrs": 0.002  # per GB per month
     },
     "monitoring": {
-        "log_analytics_gb": 3.50,  # per GB ingested
-        "application_insights_gb": 3.25,  # per GB
-    },
-    "functions": {
-        "premium_ep1": 0.252,  # per hour
-    },
-    "databricks": {
-        "all_purpose_dbu": 0.75,  # per DBU hour
-    }
-}
-
-# LLM Pricing (USD per 1M tokens) - January 2025 Pricing
-# Sources: OpenAI API pricing, Anthropic API pricing, Google Gemini pricing
-# Note: Claude is NOT available on Azure, using Anthropic API pricing
-LLM_PRICING_USD = {
-    "gpt-4o": {
-        "input": 2.50,  # per 1M input tokens (Azure OpenAI)
-        "output": 10.00,  # per 1M output tokens
-        "cache_read": 1.25,  # 50% discount for prompt caching
-        "provider": "Azure OpenAI",
-        "context_window": 128000
-    },
-    "gpt-4-turbo": {
-        "input": 10.00,
-        "output": 30.00,
-        "cache_read": 5.00,
-        "provider": "Azure OpenAI",
-        "context_window": 128000
-    },
-    "gpt-3.5-turbo": {
-        "input": 0.50,  # Cheaper option for simple tasks
-        "output": 1.50,
-        "cache_read": 0.25,
-        "provider": "Azure OpenAI",
-        "context_window": 16000
-    },
-    "claude-3.5-sonnet": {  # Via Anthropic API (NOT on Azure)
-        "input": 3.00,
-        "output": 15.00,
-        "cache_read": 0.30,  # 90% discount for prompt caching
-        "provider": "Anthropic API",
-        "context_window": 200000
-    },
-    "claude-3.5-opus": {  # Via Anthropic API (NOT on Azure)
-        "input": 15.00,
-        "output": 75.00,
-        "cache_read": 1.50,  # 90% discount
-        "provider": "Anthropic API",
-        "context_window": 200000
-    },
-    "gemini-1.5-pro": {  # Google Gemini via API
-        "input": 1.25,
-        "output": 5.00,
-        "cache_read": 0.625,  # 50% discount
-        "provider": "Google AI API",
-        "context_window": 2000000  # 2M context!
-    },
-    "llama-3.1-70b": {  # Self-hosted on Azure GPU (NOT recommended for SCIP)
-        "input": 0.00,  # No API costs, just infrastructure
-        "output": 0.00,
-        "cache_read": 0.00,
-        "infrastructure_monthly": 0,  # Included in GPU node cost (if used)
-        "provider": "Self-hosted",
-        "context_window": 128000,
-        "note": "Not recommended for SCIP v2.1 - use API-based models"
+        "log_analytics_gb": 2.30,  # per GB
+        "application_insights_gb": 2.30  # per GB
     }
 }
 
 # Premium Data Source Pricing (USD per month) - January 2025
-# Note: These are enterprise tier prices for 100 users
 DATA_SOURCE_PRICING_USD = {
-    "zoominfo": 15000,  # Enterprise tier (100 seats)
-    "linkedin_sales_navigator": 9900,  # 100 seats @ $99/month/seat
-    "clearbit": 12000,  # Enterprise tier with enrichment API
-    "hubspot_enterprise": 0,  # Using data sync only (no additional UI cost)
-    "salesforce_api": 0,  # Data sync via REST API (included in existing licenses)
-    "news_apis": 200,  # NewsAPI + aggregators
-    "social_media_apis": 150,  # Twitter/LinkedIn APIs
-    "company_data_apis": 300,  # Crunchbase, PitchBook access
+    "ZoomInfo": 15000,  # Enterprise tier
+    "LinkedIn Sales Navigator": 9900,  # Enterprise tier
+    "Clearbit": 5000,  # Enterprise tier
+    "HubSpot/Salesforce CRM": 0,  # Data sync only, no UI
+    "News APIs": 2000,  # Multiple news sources
+    "Social Media APIs": 1500,  # Twitter, LinkedIn, etc.
+    "Company Data APIs": 3000   # Various company data providers
 }
 
-# Exchange Rate (AUD to USD)
+# Exchange rate (AUD to USD)
 AUD_TO_USD = 0.65
 
 # ===========================
-# SERVICE TIER CONFIGURATIONS
+# AI AGENT CONFIGURATIONS
 # ===========================
-# These define the infrastructure and LLM configurations for each pricing tier
 
-SERVICE_TIERS = {
-    "basic": {
-        "name": "Basic Plan",
-        "target_price_per_user_monthly": 30.0,  # $30 per user per month
-        "description": "Best for: Low-volume use, rapid experimentation, minimal infrastructure",
-
-        # LLM Configuration - Cheapest models
-        "llm_mix": {
-            "gpt-3.5-turbo": 70.0,      # Extremely cost-effective
-            "claude-3-haiku": 30.0       # Most affordable Anthropic model
-        },
-        "use_prompt_caching": True,
-        "cache_hit_rate": 0.80,  # Higher cache for cost savings
-
-        # Infrastructure - Minimal (open-source alternatives)
-        "infrastructure_scale": 0.3,  # 30% of base infrastructure
-        "custom_infrastructure": {
-            "aks_nodes": 2,           # Minimal Kubernetes (down from 8)
-            "gpu_nodes": 0,           # No GPU
-            "sql_vcores": 2,          # Minimal SQL (down from 12)
-            "cosmos_ru": 0,           # No Cosmos DB - use open-source
-            "neo4j_nodes": 0,         # No Neo4j - use in-memory or SQLite
-            "storage_hot_tb": 0.02,   # 20 GB hot storage
-            "storage_cool_tb": 0.1    # 100 GB cool storage
-        },
-        "memory_type": "in_memory",   # Free in-memory (no Redis/Cosmos)
-        "use_reserved_instances": False,  # PAYG for flexibility
-
-        # Limits
-        "max_queries_per_user_per_month": 50,
-        "max_input_tokens": 5000,
-        "max_output_tokens": 500,
-        "data_sources_included": []  # No premium data sources
-    },
-
-    "standard": {
-        "name": "Standard Plan",
-        "target_price_per_user_monthly": 149.0,  # $149 per user per month
-        "description": "Best for: Production use with balanced cost/performance, hybrid approach",
-
-        # LLM Configuration - Hybrid (cheap for common, premium for complex)
-        "llm_mix": {
-            "gpt-3.5-turbo": 40.0,      # Common queries
-            "gpt-4o": 40.0,             # Complex queries
-            "claude-3-haiku": 20.0      # Fast responses
-        },
-        "use_prompt_caching": True,
-        "cache_hit_rate": 0.70,
-
-        # Infrastructure - Balanced
-        "infrastructure_scale": 0.6,  # 60% of base infrastructure
-        "custom_infrastructure": {
-            "aks_nodes": 5,           # Moderate Kubernetes (down from 8)
-            "gpu_nodes": 0,           # No GPU (using API-based LLMs)
-            "sql_vcores": 6,          # Moderate SQL (down from 12)
-            "cosmos_ru": 15000,       # Reduced Cosmos (down from 45000)
-            "neo4j_nodes": 1,         # Single Neo4j node (down from 2)
-            "storage_hot_tb": 5,      # 5 TB hot storage
-            "storage_cool_tb": 40     # 40 TB cool storage
-        },
-        "memory_type": "redis",       # Redis for caching
-        "use_reserved_instances": True,  # Cost savings
-
-        # Limits
-        "max_queries_per_user_per_month": 500,
-        "max_input_tokens": 10000,
-        "max_output_tokens": 2000,
-        "data_sources_included": ["linkedin_sales_navigator"]  # 1 data source
-    },
-
-    "premium": {
-        "name": "Premium Plan",
-        "target_price_per_user_monthly": 999.0,  # $999 per user per month
-        "description": "Best for: Enterprise, unlimited usage, best performance, all features",
-
-        # LLM Configuration - Best models
-        "llm_mix": {
-            "gpt-4o": 60.0,             # Primary model
-            "claude-3.5-sonnet": 30.0,  # Best Anthropic model
-            "o1-preview": 10.0          # Reasoning tasks
-        },
-        "use_prompt_caching": True,
-        "cache_hit_rate": 0.60,  # Lower cache (more fresh responses)
-
-        # Infrastructure - Full scale (150% for enterprise performance)
-        "infrastructure_scale": 1.5,
-        "custom_infrastructure": {
-            "aks_nodes": 12,          # Enhanced Kubernetes (up from 8)
-            "gpu_nodes": 2,           # GPU for local models if needed
-            "sql_vcores": 18,         # Enhanced SQL (up from 12)
-            "cosmos_ru": 67500,       # Enhanced Cosmos (up from 45000)
-            "neo4j_nodes": 3,         # HA Neo4j cluster (up from 2)
-            "storage_hot_tb": 25,     # 25 TB hot storage
-            "storage_cool_tb": 200    # 200 TB cool storage
-        },
-        "memory_type": "cosmos_db",   # Premium NoSQL memory
-        "use_reserved_instances": True,  # Cost savings
-
-        # Limits (unlimited)
-        "max_queries_per_user_per_month": 999999,  # Unlimited
-        "max_input_tokens": 100000,
-        "max_output_tokens": 10000,
-        "data_sources_included": [  # All data sources
-            "zoominfo",
-            "linkedin_sales_navigator",
-            "clearbit",
-            "news_apis",
-            "social_media_apis",
-            "company_data_apis"
-        ]
+AI_AGENTS = {
+    "sales-coach": {
+        "name": "Sales Coach in the Pocket",
+        "description": "Multi-agent sales coaching system with 4Cs framework",
+        "data_sources": [
+            "ZoomInfo",
+            "LinkedIn Sales Navigator", 
+            "Clearbit",
+            "HubSpot/Salesforce CRM",
+            "News APIs",
+            "Social Media APIs",
+            "Company Data APIs"
+        ],
+        "infrastructure": {
+            "aks_nodes": 8,
+            "gpu_nodes": 2,
+            "sql_vcores": 12,
+            "cosmos_ru": 45000,
+            "neo4j_nodes": 2,
+            "storage_hot_tb": 0.5,
+            "storage_cool_tb": 2.0
+        }
     }
 }
 
@@ -387,41 +135,58 @@ class CostCalculatorRequest(BaseModel):
         description="Service tier: basic ($30/user), standard ($149/user), premium ($999/user)"
     )
 
+    # Deployment Type (NEW - cloud API vs on-premise)
+    deployment_type: str = Field(
+        default="cloud_api",
+        description="Deployment type: cloud_api (token-based pricing) or on_premise (infrastructure-based pricing)"
+    )
+
     # User Parameters
     num_users: int = Field(default=100, ge=1, le=10000)
     queries_per_user_per_month: int = Field(default=1000, ge=10, le=10000)  # Lowered from 100 to 10 for Sales Coach assessments
     avg_input_tokens: int = Field(default=10000, ge=1000, le=100000)
     avg_output_tokens: int = Field(default=1000, ge=100, le=10000)
 
-    # Infrastructure Scaling Multiplier (1.0 = base, 2.0 = double)
-    infrastructure_scale: float = Field(default=1.0, ge=0.5, le=5.0)
+    # Infrastructure Parameters
+    infrastructure_scale: float = Field(default=1.0, ge=0.1, le=5.0)
+    memory_type: str = Field(default="redis", description="Memory system: redis, cosmos-db, neo4j, in_memory")
 
-    # LLM Mix (percentages, should sum to 100)
+    # LLM Configuration
     llm_mix: Dict[str, float] = Field(
-        default={
-            "gpt-4o": 60.0,
-            "claude-3.5-sonnet": 30.0,
-            "llama-3.1-70b": 10.0
-        }
+        default={"gpt-4o": 60.0, "claude-3.5-sonnet": 30.0, "llama-3.1-70b": 10.0},
+        description="LLM model distribution (percentages must sum to 100)"
     )
 
-    # Usage Patterns
-    cache_hit_rate: float = Field(default=0.70, ge=0.0, le=0.99)
+    # Optimization Settings
+    cache_hit_rate: float = Field(default=0.70, ge=0.0, le=1.0)
     use_prompt_caching: bool = Field(default=True)
     use_reserved_instances: bool = Field(default=True)
 
-    # Memory System Selection (THIS ADDRESSES USER'S QUESTION)
-    memory_type: str = Field(default="redis", description="Memory system: redis, cosmos_db, neo4j, in_memory")
-
-    # MCP Tools Selection (THIS ADDRESSES USER'S QUESTION)
-    selected_tools: List[str] = Field(
+    # MCP Tools (NEW - addresses user's question)
+    mcp_tools: List[str] = Field(
         default=[],
-        description="List of selected MCP tool names (e.g., ['research_tool', 'fog_analysis_tool'])"
+        description="Selected MCP tools for the agent"
     )
 
-    # Optional: Override infrastructure (if not provided, uses agent defaults)
-    custom_infrastructure: Optional[Dict[str, int]] = None
+class AgentCostRequest(BaseModel):
+    """Request model for calculating individual agent LLM costs"""
+    llm_model: str = Field(..., description="The LLM model used by this agent")
+    deployment_type: str = Field(default="cloud_api", description="cloud_api or on_premise")
+    num_users: int = Field(default=100, ge=1, le=10000)
+    queries_per_user_per_month: int = Field(default=40, ge=1, le=10000)
+    avg_tokens_per_request: int = Field(default=5000, ge=100, le=100000)
+    cache_hit_rate: float = Field(default=0.70, ge=0.0, le=1.0)
+    use_prompt_caching: bool = Field(default=True)
 
+class AgentCostResponse(BaseModel):
+    """Response model for individual agent cost"""
+    agent_llm_cost_monthly: float
+    agent_llm_cost_annual: float
+    total_queries_per_month: int
+    total_input_tokens_per_month: int
+    total_output_tokens_per_month: int
+    llm_model: str
+    deployment_type: str
 
 class CostBreakdown(BaseModel):
     category: str
@@ -432,533 +197,417 @@ class CostBreakdown(BaseModel):
     quantity: float
     notes: str
 
-
 class AgentArchitecture(BaseModel):
-    agent_type: str
-    agent_name: str
+    name: str
     description: str
-    agents_count: int
-    agents_list: List[str]
-    mcp_tools: Optional[List[str]] = []  # MCP tools and functions
-    data_buckets: int
     data_sources: List[str]
-    complexity: str
     infrastructure: Dict[str, float]
 
-
 class CostCalculatorResponse(BaseModel):
-    # Agent Information
-    agent_architecture: AgentArchitecture
-
-    # Summary
+    # Total Costs
     total_monthly_cost: float
     total_annual_cost: float
-    cost_per_user_monthly: float
-    cost_per_user_annual: float
-    cost_per_query: float
-
-    # Fixed vs Variable
-    fixed_monthly_cost: float
-    variable_monthly_cost: float
-
-    # Category Totals (in tabs)
-    infrastructure_costs: float
+    
+    # Cost Breakdown by Category
     llm_costs: float
+    infrastructure_costs: float
     data_source_costs: float
     monitoring_costs: float
-    memory_system_costs: float  # NEW - addresses user's question
-    mcp_tools_costs: float      # NEW - addresses user's question
+    memory_system_costs: float  # Tier-based
+    retrieval_costs: float  # NEW - Tier-based RAG/Vector DB costs
+    security_costs: float  # NEW - Tier-based security costs
+    prompt_tuning_costs: float  # NEW - Tier-based prompt optimization costs
+    mcp_tools_costs: float  # User-selected tools
 
     # Detailed Breakdown by Tab
-    infrastructure_breakdown: List[CostBreakdown]
     llm_breakdown: List[CostBreakdown]
+    infrastructure_breakdown: List[CostBreakdown]
     data_source_breakdown: List[CostBreakdown]
     monitoring_breakdown: List[CostBreakdown]
-    memory_system_breakdown: List[CostBreakdown]  # NEW
-    mcp_tools_breakdown: List[CostBreakdown]      # NEW
+    memory_system_breakdown: List[CostBreakdown]
+    retrieval_breakdown: List[CostBreakdown]  # NEW
+    security_breakdown: List[CostBreakdown]  # NEW
+    prompt_tuning_breakdown: List[CostBreakdown]  # NEW
+    mcp_tools_breakdown: List[CostBreakdown]
 
     # Metrics
     queries_per_month: int
     input_tokens_per_month: int
     output_tokens_per_month: int
     estimated_data_size_gb: float
-
-    # Cost Savings
     savings_from_caching: float
     savings_from_reserved_instances: float
 
-
 # ===========================
-# HELPER FUNCTIONS
+# COST CALCULATION FUNCTIONS
 # ===========================
 
-def get_agent_infrastructure(agent_type: str, scale: float, custom: Optional[Dict] = None) -> Dict[str, float]:
-    """Get infrastructure configuration for an agent, scaled appropriately"""
-    if agent_type not in AI_AGENTS:
-        raise HTTPException(status_code=400, detail=f"Unknown agent type: {agent_type}")
+def get_agent_infrastructure(agent_type: str, service_tier: str, scale: float, custom: Optional[Dict] = None) -> Dict[str, float]:
+    """
+    Get infrastructure configuration for an agent based on service tier.
+    Uses tier-specific infrastructure from service_tiers.py instead of agent defaults.
+    """
+    from config.service_tiers import INFRASTRUCTURE_CONFIGS
 
-    base_infra = AI_AGENTS[agent_type]["base_infrastructure"]
+    # Get tier-specific infrastructure configuration
+    tier_infra = INFRASTRUCTURE_CONFIGS.get(service_tier.lower(), INFRASTRUCTURE_CONFIGS["standard"])
 
+    # Convert storage from GB to TB for compatibility with existing calculations
+    base_infra = {
+        "aks_nodes": tier_infra.get("aks_nodes", 5),
+        "gpu_nodes": 0,  # No GPU nodes in tier configs, set to 0
+        "sql_vcores": tier_infra.get("sql_vcores", 6),
+        "cosmos_ru": tier_infra.get("cosmos_ru", 15000),
+        "neo4j_nodes": tier_infra.get("neo4j_nodes", 1),
+        "storage_hot_tb": tier_infra.get("storage_hot_gb", 500) / 1024.0,  # Convert GB to TB
+        "storage_cool_tb": tier_infra.get("storage_cool_gb", 4000) / 1024.0,  # Convert GB to TB
+    }
+
+    # Apply custom overrides if provided
     if custom:
-        return {k: custom.get(k, v) for k, v in base_infra.items()}
+        base_infra = {**base_infra, **custom}
 
-    return {k: v * scale for k, v in base_infra.items()}
-
+    # Apply scale multiplier
+    return {key: value * scale for key, value in base_infra.items()}
 
 def calculate_infrastructure_costs(infra: Dict[str, float], use_reserved: bool) -> tuple[float, List[CostBreakdown]]:
-    """Calculate all infrastructure costs"""
+    """Calculate infrastructure costs based on Azure pricing"""
     breakdown = []
     total = 0.0
 
     # AKS Nodes
-    vm_price = AZURE_PRICING_SYDNEY["compute"]["Standard_D8s_v5"]
-    hourly_rate = vm_price["reserved_1yr"] if use_reserved else vm_price["payg"]
-    monthly_cost = hourly_rate * 730 * infra["aks_nodes"]
-    total += monthly_cost
+    aks_cost = AZURE_PRICING_SYDNEY["compute"]["Standard_D16s_v5"]["reserved_1yr" if use_reserved else "payg"] * infra["aks_nodes"] * 730
+    total += aks_cost
     breakdown.append(CostBreakdown(
         category="Infrastructure",
-        subcategory="AKS Agent Nodes",
-        monthly_cost=monthly_cost,
-        annual_cost=monthly_cost * 12,
+        subcategory="AKS Nodes",
+        monthly_cost=aks_cost,
+        annual_cost=aks_cost * 12,
         unit="nodes",
         quantity=infra["aks_nodes"],
-        notes=f"Standard_D8s_v5 × {int(infra['aks_nodes'])} ({'Reserved' if use_reserved else 'PAYG'})"
+        notes=f"Standard_D16s_v5 × {int(infra['aks_nodes'])} nodes"
     ))
 
-    # GPU Nodes
+    # GPU Nodes (if any)
     if infra["gpu_nodes"] > 0:
-        gpu_price = AZURE_PRICING_SYDNEY["compute"]["Standard_NC6s_v3"]
-        hourly_rate = gpu_price["reserved_1yr"] if use_reserved else gpu_price["payg"]
-        monthly_cost = hourly_rate * 730 * infra["gpu_nodes"]
-        total += monthly_cost
+        gpu_cost = AZURE_PRICING_SYDNEY["compute"]["Standard_NC6s_v3"]["reserved_1yr" if use_reserved else "payg"] * infra["gpu_nodes"] * 730
+        total += gpu_cost
         breakdown.append(CostBreakdown(
             category="Infrastructure",
-            subcategory="GPU Nodes (Llama Hosting)",
-            monthly_cost=monthly_cost,
-            annual_cost=monthly_cost * 12,
+            subcategory="GPU Nodes",
+            monthly_cost=gpu_cost,
+            annual_cost=gpu_cost * 12,
             unit="nodes",
             quantity=infra["gpu_nodes"],
-            notes=f"Standard_NC6s_v3 × {int(infra['gpu_nodes'])} with V100 GPUs"
+            notes=f"Standard_NC6s_v3 × {int(infra['gpu_nodes'])} nodes"
         ))
 
-    # AKS Management
-    aks_mgmt = AZURE_PRICING_SYDNEY["kubernetes"]["aks_management"] * 730
-    total += aks_mgmt
-    breakdown.append(CostBreakdown(
-        category="Infrastructure",
-        subcategory="AKS Management",
-        monthly_cost=aks_mgmt,
-        annual_cost=aks_mgmt * 12,
-        unit="cluster",
-        quantity=1,
-        notes="Kubernetes cluster management fee"
-    ))
-
-    # Storage - Hot Tier
-    storage_hot = AZURE_PRICING_SYDNEY["storage"]["adls_gen2_hot"] * infra["storage_hot_tb"] * 1024
-    total += storage_hot
-    breakdown.append(CostBreakdown(
-        category="Infrastructure",
-        subcategory="Storage (Hot Tier)",
-        monthly_cost=storage_hot,
-        annual_cost=storage_hot * 12,
-        unit="TB",
-        quantity=infra["storage_hot_tb"],
-        notes="ADLS Gen2 Hot tier for active data"
-    ))
-
-    # Storage - Cool Tier
-    storage_cool = AZURE_PRICING_SYDNEY["storage"]["adls_gen2_cool"] * infra["storage_cool_tb"] * 1024
-    total += storage_cool
-    breakdown.append(CostBreakdown(
-        category="Infrastructure",
-        subcategory="Storage (Cool Tier)",
-        monthly_cost=storage_cool,
-        annual_cost=storage_cool * 12,
-        unit="TB",
-        quantity=infra["storage_cool_tb"],
-        notes="ADLS Gen2 Cool tier for archival data"
-    ))
-
-    # Azure SQL Database
-    sql_cost = AZURE_PRICING_SYDNEY["database"]["sql_gen5_vcore"] * infra["sql_vcores"] * 730
+    # SQL Database
+    sql_cost = AZURE_PRICING_SYDNEY["database"]["sql_standard"] * infra["sql_vcores"] * 730
     total += sql_cost
     breakdown.append(CostBreakdown(
         category="Infrastructure",
-        subcategory="Azure SQL Database",
+        subcategory="SQL Database",
         monthly_cost=sql_cost,
         annual_cost=sql_cost * 12,
         unit="vCores",
         quantity=infra["sql_vcores"],
-        notes=f"General Purpose Gen5, {int(infra['sql_vcores'])} vCores"
+        notes=f"Standard tier × {int(infra['sql_vcores'])} vCores"
     ))
 
-    # Cosmos DB
-    cosmos_cost = AZURE_PRICING_SYDNEY["database"]["cosmosdb_ru_100"] * (infra["cosmos_ru"] / 100) * 730
-    total += cosmos_cost
+    # Storage
+    hot_storage_cost = AZURE_PRICING_SYDNEY["storage"]["hot_lrs"] * infra["storage_hot_tb"] * 1024  # TB to GB
+    cool_storage_cost = AZURE_PRICING_SYDNEY["storage"]["cool_lrs"] * infra["storage_cool_tb"] * 1024
+    storage_total = hot_storage_cost + cool_storage_cost
+    total += storage_total
     breakdown.append(CostBreakdown(
         category="Infrastructure",
-        subcategory="Cosmos DB",
-        monthly_cost=cosmos_cost,
-        annual_cost=cosmos_cost * 12,
-        unit="RU/s",
-        quantity=infra["cosmos_ru"],
-        notes=f"{int(infra['cosmos_ru']):,} RU/s provisioned throughput"
-    ))
-
-    # Neo4j (self-hosted on VMs)
-    if infra["neo4j_nodes"] > 0:
-        neo4j_vm = AZURE_PRICING_SYDNEY["compute"]["Standard_D16s_v5"]
-        hourly_rate = neo4j_vm["reserved_1yr"] if use_reserved else neo4j_vm["payg"]
-        neo4j_cost = hourly_rate * 730 * infra["neo4j_nodes"]
-        total += neo4j_cost
-        breakdown.append(CostBreakdown(
-            category="Infrastructure",
-            subcategory="Neo4j Graph Database",
-            monthly_cost=neo4j_cost,
-            annual_cost=neo4j_cost * 12,
-            unit="nodes",
-            quantity=infra["neo4j_nodes"],
-            notes=f"Standard_D16s_v5 × {int(infra['neo4j_nodes'])} nodes"
-        ))
-
-    # Redis Cache
-    redis_cost = AZURE_PRICING_SYDNEY["database"]["redis_c6"] * 730
-    total += redis_cost
-    breakdown.append(CostBreakdown(
-        category="Infrastructure",
-        subcategory="Redis Cache",
-        monthly_cost=redis_cost,
-        annual_cost=redis_cost * 12,
-        unit="cache",
-        quantity=1,
-        notes="C6 (6GB) cache for session/response caching"
-    ))
-
-    # Networking
-    apim_cost = AZURE_PRICING_SYDNEY["networking"]["api_management_standard"]
-    total += apim_cost
-    breakdown.append(CostBreakdown(
-        category="Infrastructure",
-        subcategory="API Management",
-        monthly_cost=apim_cost,
-        annual_cost=apim_cost * 12,
-        unit="gateway",
-        quantity=1,
-        notes="Standard tier API Gateway"
-    ))
-
-    front_door_cost = AZURE_PRICING_SYDNEY["networking"]["front_door_standard"]
-    total += front_door_cost
-    breakdown.append(CostBreakdown(
-        category="Infrastructure",
-        subcategory="Azure Front Door",
-        monthly_cost=front_door_cost,
-        annual_cost=front_door_cost * 12,
-        unit="service",
-        quantity=1,
-        notes="Global load balancing and CDN"
-    ))
-
-    firewall_cost = AZURE_PRICING_SYDNEY["networking"]["firewall"] * 730
-    total += firewall_cost
-    breakdown.append(CostBreakdown(
-        category="Infrastructure",
-        subcategory="Azure Firewall",
-        monthly_cost=firewall_cost,
-        annual_cost=firewall_cost * 12,
-        unit="firewall",
-        quantity=1,
-        notes="Network security and filtering"
+        subcategory="Storage",
+        monthly_cost=storage_total,
+        annual_cost=storage_total * 12,
+        unit="GB",
+        quantity=infra["storage_hot_tb"] + infra["storage_cool_tb"],
+        notes=f"{infra['storage_hot_tb']}TB hot + {infra['storage_cool_tb']}TB cool"
     ))
 
     return total, breakdown
-
 
 def calculate_llm_costs(
-    num_users: int,
-    queries_per_user: int,
-    input_tokens: int,
-    output_tokens: int,
     llm_mix: Dict[str, float],
+    total_queries: int,
+    avg_input_tokens: int,
+    avg_output_tokens: int,
     cache_hit_rate: float,
-    use_caching: bool
-) -> tuple[float, List[CostBreakdown], float]:
-    """Calculate LLM API costs"""
+    use_prompt_caching: bool
+) -> tuple[float, List[CostBreakdown]]:
+    """Calculate LLM costs based on token usage and pricing"""
     breakdown = []
     total = 0.0
-    savings = 0.0
-
-    total_queries = num_users * queries_per_user
-    total_input_tokens = total_queries * input_tokens
-    total_output_tokens = total_queries * output_tokens
 
     for model, percentage in llm_mix.items():
-        if percentage == 0:
+        if percentage <= 0:
             continue
 
-        model_queries = (percentage / 100.0) * total_queries
-        model_input_tokens = (percentage / 100.0) * total_input_tokens
-        model_output_tokens = (percentage / 100.0) * total_output_tokens
+        # Get pricing for this model
+        pricing = LLM_PRICING_USD.get(model, {"input": 2.50, "output": 10.00, "cache_read": 1.25})
+        
+        # Calculate tokens for this model
+        model_queries = total_queries * (percentage / 100)
+        input_tokens = model_queries * avg_input_tokens
+        output_tokens = model_queries * avg_output_tokens
 
-        # Get pricing from LLM_PRICING_USD
-        if model not in LLM_PRICING_USD:
-            continue
+        # Apply caching
+        if use_prompt_caching and "cache_read" in pricing:
+            cached_input_tokens = input_tokens * cache_hit_rate
+            fresh_input_tokens = input_tokens * (1 - cache_hit_rate)
             
-        llm_pricing = LLM_PRICING_USD[model]
-
-        # Handle Llama (self-hosted)
-        if "llama" in model.lower():
-            # For Llama, infrastructure cost is included in GPU nodes
-            monthly_cost = 0.0  # No additional LLM API cost
-            breakdown.append(CostBreakdown(
-                category="LLM",
-                subcategory=f"{model} (Self-Hosted)",
-                monthly_cost=monthly_cost,
-                annual_cost=monthly_cost * 12,
-                unit="infrastructure",
-                quantity=percentage,
-                notes=f"{percentage:.0f}% of queries, self-hosted on GPU nodes"
-            ))
-            continue
-
-        # Get pricing (USD per 1M tokens)
-        input_price = llm_pricing.get('input', 0.0)
-        output_price = llm_pricing.get('output', 0.0)
-        cache_price = llm_pricing.get('cache_read', 0.0)
-
-        # Calculate with caching
-        if use_caching and cache_hit_rate > 0:
-            # Cached reads
-            cached_input_tokens = model_input_tokens * cache_hit_rate
-            uncached_input_tokens = model_input_tokens * (1 - cache_hit_rate)
-
-            # Cost calculation (convert to millions)
-            cached_input_cost = (cached_input_tokens / 1_000_000) * cache_price
-            uncached_input_cost = (uncached_input_tokens / 1_000_000) * input_price
-            output_cost = (model_output_tokens / 1_000_000) * output_price
-
-            monthly_cost_usd = cached_input_cost + uncached_input_cost + output_cost
-
-            # Calculate savings
-            full_price_input = (model_input_tokens / 1_000_000) * input_price
-            current_input = cached_input_cost + uncached_input_cost
-            savings += (full_price_input - current_input)
+            # Cost calculation
+            input_cost = (cached_input_tokens / 1000000 * pricing["cache_read"] + 
+                         fresh_input_tokens / 1000000 * pricing["input"])
         else:
-            # No caching
-            input_cost = (model_input_tokens / 1_000_000) * input_price
-            output_cost = (model_output_tokens / 1_000_000) * output_price
-            monthly_cost_usd = input_cost + output_cost
-
-        # Convert to AUD
-        monthly_cost = monthly_cost_usd / AUD_TO_USD
-        total += monthly_cost
-
-        cache_note = f" (Cache hit: {cache_hit_rate*100:.0f}%)" if use_caching else ""
+            input_cost = input_tokens / 1000000 * pricing["input"]
+        
+        output_cost = output_tokens / 1000000 * pricing["output"]
+        model_cost = (input_cost + output_cost) / AUD_TO_USD  # Convert to AUD
+        
+        total += model_cost
+        
         breakdown.append(CostBreakdown(
-            category="LLM",
+            category="LLM Costs",
             subcategory=model,
-            monthly_cost=monthly_cost,
-            annual_cost=monthly_cost * 12,
+            monthly_cost=model_cost,
+            annual_cost=model_cost * 12,
             unit="tokens",
-            quantity=model_input_tokens + model_output_tokens,
-            notes=f"{percentage:.0f}% of queries{cache_note}"
+            quantity=input_tokens + output_tokens,
+            notes=f"{percentage}% of queries, {cache_hit_rate*100:.0f}% cache hit rate"
         ))
 
-    return total, breakdown, savings / AUD_TO_USD
+    return total, breakdown
 
-
-def calculate_data_source_costs(agent_type: str) -> tuple[float, List[CostBreakdown]]:
-    """Calculate data source costs based on agent requirements"""
+def calculate_data_source_costs(agent_type: str, service_tier: str = "standard") -> tuple[float, List[CostBreakdown]]:
+    """Calculate data source costs based on service tier (NOT agent requirements)"""
     breakdown = []
-    total = 0.0
 
-    agent = AI_AGENTS[agent_type]
-    data_sources = agent["data_sources"]
+    # Get tier-specific data source configuration from service_tiers.py
+    tier_config = get_tier_config(service_tier)
+    data_sources_config = tier_config.get("data_sources", {})
 
-    # Map data source names to pricing config names
-    source_mapping = {
-        "ZoomInfo (Premium)": "ZoomInfo",
-        "ZoomInfo": "ZoomInfo",
-        "LinkedIn Sales Navigator (Premium)": "LinkedIn Sales Navigator",
-        "LinkedIn Sales Navigator": "LinkedIn Sales Navigator",
-        "Clearbit (Premium)": "Clearbit",
-        "Clearbit": "Clearbit",
-        "HubSpot/Salesforce CRM (Data Sync only, no UI)": "HubSpot/Salesforce CRM",
-        "HubSpot/Salesforce CRM": "HubSpot/Salesforce CRM",
-        "News APIs": "News APIs",
-        "Social Media APIs": "Social Media APIs",
-        "Company Data APIs": "Company Data APIs"
-    }
+    # Use the tier-specific monthly cost directly
+    monthly_cost_aud = data_sources_config.get("monthly_cost", 0.0)
+    sources = data_sources_config.get("sources", [])
 
-    for source in data_sources:
-        mapped_name = source_mapping.get(source, source)
-        monthly_cost_usd = DATA_SOURCE_PRICING_USD.get(mapped_name, 0)
-
-        if monthly_cost_usd == 0:
-            # Skip zero-cost items (like CRM data sync)
-            continue
-
-        monthly_cost = monthly_cost_usd / AUD_TO_USD
-        total += monthly_cost
+    if monthly_cost_aud > 0:
+        # If there's a cost, add breakdown for included data sources
+        sources_str = ", ".join(sources) if sources else "No premium data sources"
         breakdown.append(CostBreakdown(
             category="Data Sources",
-            subcategory=source,
-            monthly_cost=monthly_cost,
-            annual_cost=monthly_cost * 12,
+            subcategory=f"{service_tier.title()} Tier Data Sources",
+            monthly_cost=monthly_cost_aud,
+            annual_cost=monthly_cost_aud * 12,
             unit="subscription",
-            quantity=1,
-            notes=f"Enterprise tier subscription"
+            quantity=len(sources),
+            notes=f"Included sources: {sources_str}"
+        ))
+    else:
+        # Basic tier - no premium data sources
+        breakdown.append(CostBreakdown(
+            category="Data Sources",
+            subcategory="No Premium Data Sources",
+            monthly_cost=0.0,
+            annual_cost=0.0,
+            unit="subscription",
+            quantity=0,
+            notes="Basic tier includes no premium data sources"
         ))
 
-    return total, breakdown
+    return monthly_cost_aud, breakdown
 
-
-def calculate_monitoring_costs(data_ingestion_gb: float) -> tuple[float, List[CostBreakdown]]:
-    """Calculate monitoring and observability costs"""
+def calculate_monitoring_costs(data_ingestion_gb: float, service_tier: str = "standard") -> tuple[float, List[CostBreakdown]]:
+    """Calculate monitoring and observability costs based on service tier"""
     breakdown = []
-    total = 0.0
 
-    # Log Analytics
-    log_cost = AZURE_PRICING_SYDNEY["monitoring"]["log_analytics_gb"] * data_ingestion_gb
-    total += log_cost
+    # Get tier-specific monitoring configuration from service_tiers.py
+    tier_config = get_tier_config(service_tier)
+    monitoring_config = tier_config.get("monitoring", {})
+
+    monthly_cost = monitoring_config.get("monthly_cost", 0.0)
+    apm_tool = monitoring_config.get("apm_tool", "basic_logging")
+    features = monitoring_config.get("features", [])
+    features_str = ", ".join(features)
+
     breakdown.append(CostBreakdown(
         category="Monitoring",
-        subcategory="Azure Log Analytics",
-        monthly_cost=log_cost,
-        annual_cost=log_cost * 12,
-        unit="GB",
-        quantity=data_ingestion_gb,
-        notes=f"{data_ingestion_gb:.0f} GB/month log ingestion"
-    ))
-
-    # Application Insights
-    app_insights_cost = AZURE_PRICING_SYDNEY["monitoring"]["application_insights_gb"] * (data_ingestion_gb * 0.5)
-    total += app_insights_cost
-    breakdown.append(CostBreakdown(
-        category="Monitoring",
-        subcategory="Application Insights",
-        monthly_cost=app_insights_cost,
-        annual_cost=app_insights_cost * 12,
-        unit="GB",
-        quantity=data_ingestion_gb * 0.5,
-        notes="APM and telemetry"
-    ))
-
-    # Grafana/Prometheus (self-hosted) - Estimated cost
-    grafana_cost = 500.0  # Estimated monthly cost for self-hosted monitoring
-    total += grafana_cost
-    breakdown.append(CostBreakdown(
-        category="Monitoring",
-        subcategory="Grafana & Prometheus",
-        monthly_cost=grafana_cost,
-        annual_cost=grafana_cost * 12,
+        subcategory=f"{apm_tool} ({service_tier.title()} Tier)",
+        monthly_cost=monthly_cost,
+        annual_cost=monthly_cost * 12,
         unit="service",
         quantity=1,
-        notes="Self-hosted dashboards and metrics"
+        notes=f"Features: {features_str}"
     ))
-
-    return total, breakdown
-
-
-def calculate_memory_system_costs(memory_type: str, infrastructure: Dict[str, float]) -> tuple[float, List[CostBreakdown]]:
-    """
-    Calculate memory system costs based on user selection and infrastructure configuration
-    THIS ADDRESSES USER'S QUESTION: Memory selection now affects costs!
-    """
-    breakdown = []
-
-    # Calculate monthly cost based on memory type and infrastructure
-    if memory_type == "redis":
-        monthly_cost = AZURE_PRICING_SYDNEY["database"]["redis_c6"] * 730
-        breakdown.append(CostBreakdown(
-            category="Memory System",
-            subcategory="Redis Cache",
-            monthly_cost=monthly_cost,
-            annual_cost=monthly_cost * 12,
-            unit="cache",
-            quantity=1,
-            notes=f"Redis C6 (6GB) cache for session/response caching"
-        ))
-    elif memory_type == "cosmos_db":
-        # Use actual infrastructure configuration for Cosmos DB RU
-        cosmos_ru = infrastructure.get("cosmos_ru", 45000)
-        monthly_cost = AZURE_PRICING_SYDNEY["database"]["cosmosdb_ru_100"] * (cosmos_ru / 100) * 730
-        breakdown.append(CostBreakdown(
-            category="Memory System",
-            subcategory="Cosmos DB",
-            monthly_cost=monthly_cost,
-            annual_cost=monthly_cost * 12,
-            unit="RU/s",
-            quantity=cosmos_ru,
-            notes=f"{int(cosmos_ru):,} RU/s provisioned throughput"
-        ))
-    elif memory_type == "neo4j":
-        # Use actual infrastructure configuration for Neo4j nodes
-        neo4j_nodes = infrastructure.get("neo4j_nodes", 2)
-        neo4j_vm = AZURE_PRICING_SYDNEY["compute"]["Standard_D16s_v5"]
-        monthly_cost = neo4j_vm["payg"] * 730 * neo4j_nodes
-        breakdown.append(CostBreakdown(
-            category="Memory System",
-            subcategory="Neo4j Graph Database",
-            monthly_cost=monthly_cost,
-            annual_cost=monthly_cost * 12,
-            unit="nodes",
-            quantity=neo4j_nodes,
-            notes=f"Standard_D16s_v5 × {int(neo4j_nodes)} nodes"
-        ))
-    else:  # in_memory
-        monthly_cost = 0.0
-        breakdown.append(CostBreakdown(
-            category="Memory System",
-            subcategory="In-Memory",
-            monthly_cost=monthly_cost,
-            annual_cost=monthly_cost * 12,
-            unit="system",
-            quantity=1,
-            notes="Free in-memory storage (no persistence)"
-        ))
 
     return monthly_cost, breakdown
 
-
-def calculate_mcp_tools_costs(selected_tools: List[str], num_assessments: int = 4000) -> tuple[float, List[CostBreakdown]]:
+def calculate_memory_system_costs(memory_type: str, infrastructure: Dict[str, float], service_tier: str = "standard") -> tuple[float, List[CostBreakdown]]:
     """
-    Calculate MCP tools costs based on user selection
-    THIS ADDRESSES USER'S QUESTION: Tools selection now affects costs!
+    Calculate memory system costs based on service tier configuration
+    THIS ADDRESSES USER'S QUESTION: Memory selection now affects costs based on tier!
     """
     breakdown = []
 
+    # Get tier-specific memory configuration from service_tiers.py
+    tier_config = get_tier_config(service_tier)
+    memory_config = tier_config.get("memory", {})
+
+    monthly_cost = memory_config.get("monthly_cost", 0.0)
+    memory_type_tier = memory_config.get("type", "in_memory")
+    capacity_gb = memory_config.get("capacity_gb", 0)
+    persistence = memory_config.get("persistence", False)
+    replication = memory_config.get("replication", False)
+
+    features = []
+    if persistence:
+        features.append("Persistence")
+    if replication:
+        features.append("Replication")
+    if memory_config.get("global_distribution"):
+        features.append("Global Distribution")
+
+    features_str = ", ".join(features) if features else "No advanced features"
+
+    breakdown.append(CostBreakdown(
+        category="Memory System",
+        subcategory=f"{memory_type_tier.title()} ({service_tier.title()} Tier)",
+        monthly_cost=monthly_cost,
+        annual_cost=monthly_cost * 12,
+        unit="GB",
+        quantity=capacity_gb,
+        notes=f"{capacity_gb}GB capacity. Features: {features_str}"
+    ))
+
+    return monthly_cost, breakdown
+
+def calculate_mcp_tools_costs(selected_tools: List[str], num_assessments: int = 4000) -> tuple[float, List[CostBreakdown]]:
+    """Calculate MCP tools costs based on selected tools"""
+    breakdown = []
+    
     # Calculate total monthly cost for MCP tools
     total_cost = 0.0
-    
+
     # Simple pricing for MCP tools (estimated)
     mcp_tool_pricing = {
-        "CRM Integration": 200.0,  # Monthly cost for CRM sync
-        "Email Integration": 150.0,  # Monthly cost for email parsing
-        "Calendar Integration": 100.0,  # Monthly cost for calendar sync
-        "Document Analysis": 300.0,  # Monthly cost for document processing
-        "Web Search": 50.0,  # Monthly cost for web search APIs
-        "Data Enrichment": 400.0,  # Monthly cost for data enrichment
+        "research_tool": 0.50,  # $0.50 per assessment
+        "content_generation_tool": 0.30,  # $0.30 per assessment
+        "competitive_intel_tool": 0.75,  # $0.75 per assessment
+        "fog_analysis_tool": 0.40,  # $0.40 per assessment
+        "engagement_excellence_tool": 0.60,  # $0.60 per assessment
+        "impact_theme_generator_tool": 0.35,  # $0.35 per assessment
+        "license_to_sell_tool": 0.25,  # $0.25 per assessment
+        "find_money_validator_tool": 0.45,  # $0.45 per assessment
+        "speech_to_text": 0.20  # $0.20 per assessment
     }
 
-    if selected_tools:
-        for tool_name in selected_tools:
+    for tool_name in selected_tools:
+        if tool_name in mcp_tool_pricing:
             tool_cost = mcp_tool_pricing.get(tool_name, 0.0)
             total_cost += tool_cost
-            
+
             breakdown.append(CostBreakdown(
                 category="MCP Tools",
                 subcategory=tool_name,
                 monthly_cost=tool_cost,
                 annual_cost=tool_cost * 12,
-                unit="service",
-                quantity=1,
-                notes=f"Monthly subscription for {tool_name}"
+                unit="assessment",
+                quantity=num_assessments,
+                notes=f"Per assessment cost for {tool_name}"
             ))
 
     return total_cost, breakdown
 
+def calculate_retrieval_costs(service_tier: str = "standard") -> tuple[float, List[CostBreakdown]]:
+    """Calculate retrieval/RAG costs based on service tier"""
+    breakdown = []
+
+    # Get tier-specific retrieval configuration from service_tiers.py
+    tier_config = get_tier_config(service_tier)
+    retrieval_config = tier_config.get("retrieval", {})
+
+    monthly_cost = retrieval_config.get("monthly_cost", 0.0)
+    vector_db = retrieval_config.get("vector_db", "in_memory")
+    max_vectors = retrieval_config.get("max_vectors", 0)
+    indexing = retrieval_config.get("indexing", "flat")
+
+    features = []
+    if retrieval_config.get("metadata_filtering"):
+        features.append("Metadata Filtering")
+    if retrieval_config.get("hybrid_search"):
+        features.append("Hybrid Search")
+
+    features_str = ", ".join(features) if features else f"Indexing: {indexing}"
+
+    breakdown.append(CostBreakdown(
+        category="Retrieval/RAG",
+        subcategory=f"{vector_db} ({service_tier.title()} Tier)",
+        monthly_cost=monthly_cost,
+        annual_cost=monthly_cost * 12,
+        unit="vectors",
+        quantity=max_vectors,
+        notes=f"{max_vectors:,} max vectors. {features_str}"
+    ))
+
+    return monthly_cost, breakdown
+
+def calculate_security_costs(service_tier: str = "standard") -> tuple[float, List[CostBreakdown]]:
+    """Calculate security costs based on service tier"""
+    breakdown = []
+
+    # Get tier-specific security configuration from service_tiers.py
+    tier_config = get_tier_config(service_tier)
+    security_config = tier_config.get("security", {})
+
+    monthly_cost = security_config.get("monthly_cost", 0.0)
+    level = security_config.get("level", "basic")
+    features = security_config.get("features", [])
+    features_str = ", ".join(features)
+
+    compliance = security_config.get("compliance", [])
+    compliance_str = f" Compliance: {', '.join(compliance)}" if compliance else ""
+
+    breakdown.append(CostBreakdown(
+        category="Security",
+        subcategory=f"{level.title()} Security ({service_tier.title()} Tier)",
+        monthly_cost=monthly_cost,
+        annual_cost=monthly_cost * 12,
+        unit="service",
+        quantity=1,
+        notes=f"Features: {features_str}.{compliance_str}"
+    ))
+
+    return monthly_cost, breakdown
+
+def calculate_prompt_tuning_costs(service_tier: str = "standard") -> tuple[float, List[CostBreakdown]]:
+    """Calculate prompt tuning costs based on service tier"""
+    breakdown = []
+
+    # Get tier-specific prompt tuning configuration from service_tiers.py
+    tier_config = get_tier_config(service_tier)
+    prompt_tuning_config = tier_config.get("prompt_tuning", {})
+
+    monthly_cost = prompt_tuning_config.get("monthly_cost", 0.0)
+    approach = prompt_tuning_config.get("approach", "manual")
+    features = prompt_tuning_config.get("features", [])
+    features_str = ", ".join(features)
+
+    breakdown.append(CostBreakdown(
+        category="Prompt Tuning",
+        subcategory=f"{approach.replace('_', ' ').title()} ({service_tier.title()} Tier)",
+        monthly_cost=monthly_cost,
+        annual_cost=monthly_cost * 12,
+        unit="service",
+        quantity=1,
+        notes=f"Features: {features_str}"
+    ))
+
+    return monthly_cost, breakdown
 
 def apply_service_tier_config(params: CostCalculatorRequest) -> CostCalculatorRequest:
     """Apply service tier configuration to request parameters"""
@@ -967,41 +616,29 @@ def apply_service_tier_config(params: CostCalculatorRequest) -> CostCalculatorRe
     if params.service_tier and params.service_tier.lower() in SERVICE_TIERS:
         tier_config = SERVICE_TIERS[params.service_tier.lower()]
 
-        # Override LLM mix with tier configuration
-        params.llm_mix = tier_config["llm_mix"]
+        # Override LLM mix with tier configuration (using deployment_type)
+        # Build LLM mix based on available models in tier
+        llm_models = tier_config["llm_models"].get(params.deployment_type, [])
+        if llm_models:
+            # Distribute evenly across available models
+            percentage_per_model = 100.0 / len(llm_models)
+            params.llm_mix = {model: percentage_per_model for model in llm_models}
 
-        # Override caching settings
-        params.use_prompt_caching = tier_config["use_prompt_caching"]
-        params.cache_hit_rate = tier_config["cache_hit_rate"]
+        # Override caching settings from limits
+        limits = tier_config.get("limits", {})
+        params.cache_hit_rate = limits.get("cache_hit_rate", 0.70)
 
-        # Override infrastructure settings
-        params.infrastructure_scale = tier_config["infrastructure_scale"]
-        params.custom_infrastructure = tier_config["custom_infrastructure"]
-
-        # Override memory type
-        params.memory_type = tier_config["memory_type"]
-
-        # Override reserved instances setting
-        params.use_reserved_instances = tier_config["use_reserved_instances"]
-
-        # Apply usage limits (cap user inputs to tier limits)
-        if params.queries_per_user_per_month > tier_config["max_queries_per_user_per_month"]:
-            params.queries_per_user_per_month = tier_config["max_queries_per_user_per_month"]
-
-        if params.avg_input_tokens > tier_config["max_input_tokens"]:
-            params.avg_input_tokens = tier_config["max_input_tokens"]
-
-        if params.avg_output_tokens > tier_config["max_output_tokens"]:
-            params.avg_output_tokens = tier_config["max_output_tokens"]
+        # Override features
+        features = tier_config.get("features", {})
+        params.use_prompt_caching = features.get("use_prompt_caching", True)
+        params.use_reserved_instances = features.get("use_reserved_instances", False)
 
     return params
 
-
 # ===========================
-# API ENDPOINT
+# MAIN COST CALCULATION
 # ===========================
 
-@router.post("/calculate", response_model=CostCalculatorResponse)
 async def calculate_costs(params: CostCalculatorRequest):
     """Calculate comprehensive costs for AI agent deployment"""
 
@@ -1012,107 +649,99 @@ async def calculate_costs(params: CostCalculatorRequest):
     if params.agent_type not in AI_AGENTS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown agent type. Available: {list(AI_AGENTS.keys())}"
+            detail=f"Agent type '{params.agent_type}' not supported. Available: {list(AI_AGENTS.keys())}"
         )
 
-    agent_info = AI_AGENTS[params.agent_type]
+    # Get agent configuration
+    agent = AI_AGENTS[params.agent_type]
 
-    # Get infrastructure configuration
+    # Get infrastructure configuration (tier-based)
     infra = get_agent_infrastructure(
         params.agent_type,
+        params.service_tier,
         params.infrastructure_scale,
-        params.custom_infrastructure
+        None  # No custom infrastructure for now
     )
 
-    # Calculate all costs
-    infra_total, infra_breakdown = calculate_infrastructure_costs(infra, params.use_reserved_instances)
-
-    llm_total, llm_breakdown, cache_savings = calculate_llm_costs(
-        params.num_users,
-        params.queries_per_user_per_month,
-        params.avg_input_tokens,
-        params.avg_output_tokens,
-        params.llm_mix,
-        params.cache_hit_rate,
-        params.use_prompt_caching
-    )
-
-    data_total, data_breakdown = calculate_data_source_costs(params.agent_type)
-
-    # Estimate data ingestion for monitoring (based on queries and users)
-    estimated_data_gb = (params.num_users * params.queries_per_user_per_month * 0.001) + 100  # Base 100GB
-    monitor_total, monitor_breakdown = calculate_monitoring_costs(estimated_data_gb)
-
-    # Calculate MEMORY SYSTEM costs (NEW - addresses user's question)
-    memory_total, memory_breakdown = calculate_memory_system_costs(
-        memory_type=params.memory_type,
-        infrastructure=infra
-    )
-
-    # Calculate MCP TOOLS costs (NEW - addresses user's question)
-    # Calculate number of assessments/queries for tools cost
-    total_queries = params.num_users * params.queries_per_user_per_month
-    tools_total, tools_breakdown = calculate_mcp_tools_costs(
-        selected_tools=params.selected_tools,
-        num_assessments=total_queries
-    )
-
-    # Calculate totals (INCLUDING new memory and tools costs)
-    fixed_monthly = infra_total + data_total + monitor_total + memory_total + tools_total
-    variable_monthly = llm_total
-    total_monthly = fixed_monthly + variable_monthly
-    total_annual = total_monthly * 12
-
-    # Calculate savings
-    reserved_savings = 0.0
-    if params.use_reserved_instances:
-        # Estimate 40% savings on compute
-        payg_compute = 0.0
-        for item in infra_breakdown:
-            if "Node" in item.subcategory or "Database" in item.subcategory:
-                payg_compute += item.monthly_cost / 0.6  # Reverse calculate PAYG
-        reserved_savings = payg_compute - (payg_compute * 0.6)
-
-    # Metrics
+    # Calculate costs
     total_queries = params.num_users * params.queries_per_user_per_month
     total_input_tokens = total_queries * params.avg_input_tokens
     total_output_tokens = total_queries * params.avg_output_tokens
 
-    # Build agent architecture response
-    agent_architecture = AgentArchitecture(
-        agent_type=params.agent_type,
-        agent_name=agent_info["name"],
-        description=agent_info["description"],
-        agents_count=agent_info["agents_count"],
-        agents_list=agent_info["agents"],
-        mcp_tools=agent_info.get("mcp_tools", []),  # Include MCP tools if available
-        data_buckets=agent_info["data_buckets"],
-        data_sources=agent_info["data_sources"],
-        complexity=agent_info["complexity"],
-        infrastructure=infra
+    # Calculate LLM costs
+    llm_total, llm_breakdown = calculate_llm_costs(
+        params.llm_mix,
+        total_queries,
+        params.avg_input_tokens,
+        params.avg_output_tokens,
+        params.cache_hit_rate,
+        params.use_prompt_caching
     )
 
+    # Calculate infrastructure costs
+    infra_total, infra_breakdown = calculate_infrastructure_costs(infra, params.use_reserved_instances)
+
+    # Calculate tier-based costs using service_tiers.py configurations
+    data_total, data_breakdown = calculate_data_source_costs(params.agent_type, params.service_tier)
+
+    # Estimate data ingestion for monitoring (based on queries and users)
+    estimated_data_gb = (params.num_users * params.queries_per_user_per_month * 0.001) + 100  # Base 100GB
+    monitor_total, monitor_breakdown = calculate_monitoring_costs(estimated_data_gb, params.service_tier)
+
+    # Calculate MEMORY SYSTEM costs (tier-based)
+    memory_total, memory_breakdown = calculate_memory_system_costs(
+        memory_type=params.memory_type,
+        infrastructure=infra,
+        service_tier=params.service_tier
+    )
+
+    # Calculate RETRIEVAL/RAG costs (NEW - tier-based)
+    retrieval_total, retrieval_breakdown = calculate_retrieval_costs(params.service_tier)
+
+    # Calculate SECURITY costs (NEW - tier-based)
+    security_total, security_breakdown = calculate_security_costs(params.service_tier)
+
+    # Calculate PROMPT TUNING costs (NEW - tier-based)
+    prompt_tuning_total, prompt_tuning_breakdown = calculate_prompt_tuning_costs(params.service_tier)
+
+    # Calculate MCP TOOLS costs (user-selected)
+    total_queries = params.num_users * params.queries_per_user_per_month
+    tools_total, tools_breakdown = calculate_mcp_tools_costs(
+        params.mcp_tools,
+        total_queries
+    )
+
+    # Calculate savings
+    cache_savings = llm_total * (1 - params.cache_hit_rate) if params.use_prompt_caching else 0
+    reserved_savings = infra_total * 0.5 if params.use_reserved_instances else 0
+
+    # Calculate totals (INCLUDING all tier-based costs)
+    fixed_monthly = (infra_total + data_total + monitor_total + memory_total +
+                    retrieval_total + security_total + prompt_tuning_total + tools_total)
+    variable_monthly = llm_total
+    total_monthly = fixed_monthly + variable_monthly
+
     return CostCalculatorResponse(
-        agent_architecture=agent_architecture,
         total_monthly_cost=total_monthly,
-        total_annual_cost=total_annual,
-        cost_per_user_monthly=total_monthly / params.num_users,
-        cost_per_user_annual=total_annual / params.num_users,
-        cost_per_query=total_monthly / total_queries,
-        fixed_monthly_cost=fixed_monthly,
-        variable_monthly_cost=variable_monthly,
-        infrastructure_costs=infra_total,
+        total_annual_cost=total_monthly * 12,
         llm_costs=llm_total,
+        infrastructure_costs=infra_total,
         data_source_costs=data_total,
         monitoring_costs=monitor_total,
-        memory_system_costs=memory_total,  # NEW - memory costs impact!
-        mcp_tools_costs=tools_total,       # NEW - tools costs impact!
+        memory_system_costs=memory_total,
+        retrieval_costs=retrieval_total,  # NEW - tier-based RAG costs
+        security_costs=security_total,  # NEW - tier-based security costs
+        prompt_tuning_costs=prompt_tuning_total,  # NEW - tier-based prompt tuning costs
+        mcp_tools_costs=tools_total,
         infrastructure_breakdown=infra_breakdown,
         llm_breakdown=llm_breakdown,
         data_source_breakdown=data_breakdown,
         monitoring_breakdown=monitor_breakdown,
-        memory_system_breakdown=memory_breakdown,  # NEW
-        mcp_tools_breakdown=tools_breakdown,       # NEW
+        memory_system_breakdown=memory_breakdown,
+        retrieval_breakdown=retrieval_breakdown,  # NEW
+        security_breakdown=security_breakdown,  # NEW
+        prompt_tuning_breakdown=prompt_tuning_breakdown,  # NEW
+        mcp_tools_breakdown=tools_breakdown,
         queries_per_month=total_queries,
         input_tokens_per_month=total_input_tokens,
         output_tokens_per_month=total_output_tokens,
@@ -1121,57 +750,62 @@ async def calculate_costs(params: CostCalculatorRequest):
         savings_from_reserved_instances=reserved_savings
     )
 
+# ===========================
+# API ROUTES
+# ===========================
+
+router = APIRouter()
+
+@router.post("/calculate", response_model=CostCalculatorResponse)
+async def calculate_costs_endpoint(params: CostCalculatorRequest):
+    """Calculate comprehensive costs for AI agent deployment"""
+    return await calculate_costs(params)
 
 @router.get("/agents")
 async def list_agents():
-    """Get list of available AI agents"""
+    """List all available AI agents"""
     return {
         "agents": [
             {
-                "id": key,
-                "name": value["name"],
-                "description": value["description"],
-                "complexity": value["complexity"],
-                "agents_count": value["agents_count"]
+                "id": agent_id,
+                "name": agent["name"],
+                "description": agent["description"],
+                "data_sources": agent["data_sources"]
             }
-            for key, value in AI_AGENTS.items()
+            for agent_id, agent in AI_AGENTS.items()
         ]
     }
-
 
 @router.get("/agents/{agent_id}")
 async def get_agent_details(agent_id: str):
     """Get detailed information about a specific agent"""
     if agent_id not in AI_AGENTS:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
-
+    
+    agent = AI_AGENTS[agent_id]
     return {
-        "agent_id": agent_id,
-        **AI_AGENTS[agent_id]
+        "id": agent_id,
+        "name": agent["name"],
+        "description": agent["description"],
+        "data_sources": agent["data_sources"],
+        "infrastructure": agent["infrastructure"]
     }
-
 
 @router.get("/tiers")
 async def list_service_tiers():
-    """Get list of available service tiers (Basic, Standard, Premium)"""
+    """List all available service tiers"""
     return {
         "tiers": [
             {
-                "id": key,
+                "tier_id": key,
                 "name": value["name"],
-                "price_per_user_monthly": value["target_price_per_user_monthly"],
-                "description": value["description"],
-                "max_queries_per_user_per_month": value["max_queries_per_user_per_month"],
-                "max_input_tokens": value["max_input_tokens"],
-                "max_output_tokens": value["max_output_tokens"],
-                "memory_type": value["memory_type"],
-                "llm_mix": value["llm_mix"],
-                "data_sources_included": value["data_sources_included"]
+                "target_price_per_user_monthly": value["target_price_per_user_monthly"],
+                "description": value.get("description", ""),
+                "data_sources_included": value.get("data_sources", {}).get("sources", [])
             }
             for key, value in SERVICE_TIERS.items()
         ]
     }
-
 
 @router.get("/tiers/{tier_id}")
 async def get_tier_details(tier_id: str):
@@ -1182,5 +816,82 @@ async def get_tier_details(tier_id: str):
     tier_config = SERVICE_TIERS[tier_id.lower()]
     return {
         "tier_id": tier_id.lower(),
-        **tier_config
+        "name": tier_config["name"],
+        "description": tier_config.get("description", ""),
+        "target_price_per_user_monthly": tier_config["target_price_per_user_monthly"],
+        "data_sources_included": tier_config.get("data_sources", {}).get("sources", [])
     }
+
+@router.get("/tiers/{tier_id}/models")
+async def get_tier_models(tier_id: str, deployment_type: str = "cloud_api"):
+    """Get available LLM models for a specific tier and deployment type"""
+    if tier_id.lower() not in SERVICE_TIERS:
+        raise HTTPException(status_code=404, detail=f"Tier {tier_id} not found")
+
+    models = get_llm_models_for_tier(tier_id.lower(), deployment_type)
+    return {
+        "tier_id": tier_id.lower(),
+        "deployment_type": deployment_type,
+        "models": models
+    }
+
+@router.post("/calculate-agent", response_model=AgentCostResponse)
+async def calculate_agent_cost_endpoint(params: AgentCostRequest):
+    """
+    Calculate LLM costs for a SINGLE agent only (no infrastructure costs).
+    This endpoint is designed for per-agent cost calculation in the Sales Coach UI.
+    """
+    # Calculate total queries for this agent
+    total_queries = params.num_users * params.queries_per_user_per_month
+
+    # Calculate input/output tokens (70/30 split)
+    avg_input_tokens = int(params.avg_tokens_per_request * 0.7)
+    avg_output_tokens = int(params.avg_tokens_per_request * 0.3)
+
+    total_input_tokens = total_queries * avg_input_tokens
+    total_output_tokens = total_queries * avg_output_tokens
+
+    # Handle on-premise deployment differently
+    if params.deployment_type == "on_premise":
+        # Find GPU type for this model from LLM_CATEGORIES
+        from config.service_tiers import LLM_CATEGORIES
+
+        gpu_type = "A100"  # Default
+        for category in LLM_CATEGORIES.values():
+            for model in category.get("on_premise", []):
+                if model["id"] == params.llm_model:
+                    gpu_type = model.get("gpu_type", "A100")
+                    break
+
+        # Calculate hours needed per month (rough estimate based on query load)
+        # Assuming 1 query takes ~2 seconds on average
+        hours_per_month = (total_queries * 2) / 3600  # Convert seconds to hours
+        hours_per_month = max(730, hours_per_month)  # Minimum of full month (730 hours)
+
+        # Use hourly GPU cost
+        from config.service_tiers import GPU_COSTS
+        monthly_cost_usd = GPU_COSTS[gpu_type]["hourly_cost"] * hours_per_month
+
+        # Convert USD to AUD
+        monthly_cost_aud = monthly_cost_usd / AUD_TO_USD
+    else:
+        # Cloud API - Calculate LLM costs using token pricing
+        llm_total, _ = calculate_llm_costs(
+            llm_mix={params.llm_model: 100.0},  # 100% of this single model
+            total_queries=total_queries,
+            avg_input_tokens=avg_input_tokens,
+            avg_output_tokens=avg_output_tokens,
+            cache_hit_rate=params.cache_hit_rate,
+            use_prompt_caching=params.use_prompt_caching
+        )
+        monthly_cost_aud = llm_total
+
+    return AgentCostResponse(
+        agent_llm_cost_monthly=monthly_cost_aud,
+        agent_llm_cost_annual=monthly_cost_aud * 12,
+        total_queries_per_month=total_queries,
+        total_input_tokens_per_month=total_input_tokens,
+        total_output_tokens_per_month=total_output_tokens,
+        llm_model=params.llm_model,
+        deployment_type=params.deployment_type
+    )

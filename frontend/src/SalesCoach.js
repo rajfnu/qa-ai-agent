@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Briefcase, Settings, Zap, DollarSign, Database, Cpu, Brain, Users, TrendingUp, Target, Shield, MessageSquare, Info, X, Lightbulb } from 'lucide-react';
+import { Briefcase, Settings, Zap, DollarSign, Database, Cpu, Brain, Users, TrendingUp, Target, Shield, MessageSquare, Info, X, Lightbulb, Award, Sparkles, Crown, Server, BarChart3 } from 'lucide-react';
 import { useAppContext } from './AppContext';
+import axios from 'axios';
 
 // OPTIMIZED SCIP AGENT CONFIGURATION (Based on Tech_Design_Sales_Coach_AI_Agent_OPTIMIZED.md)
 const SCIP_AGENTS = {
@@ -21,7 +22,17 @@ const SCIP_AGENTS = {
       avg_tokens_per_request: 3000,
       requests_per_4cs_calculation: 1
     },
-    llmOptions: ['gpt-4o', 'claude-3.5-opus', 'gpt-4-turbo'],
+    llmOptions: [
+      // Cheap models
+      'gpt-5-nano', 'gemini-1.5-flash-8b', 'gpt-4.1-nano', 'gpt-4o-mini', 'claude-3-haiku',
+      // Mid-range models
+      'claude-3-5-haiku', 'claude-4-5-haiku', 'o3-mini', 'gpt-4.1', 'gpt-4o',
+      // Expensive models
+      'o3-deep-research', 'o1', 'claude-opus-4', 'gpt-5-pro', 'o3-pro',
+      // On-premise models
+      'llama-3-8b', 'llama-3.1-8b', 'mistral-7b', 'phi-3-mini', 'gemma-7b',
+      'llama-3-70b', 'llama-3.1-70b', 'mistral-medium', 'mixtral-8x7b'
+    ],
     toolsOptions: ['research_tool', 'content_generation_tool', 'competitive_intel_tool', 'fog_analysis_tool', 'engagement_excellence_tool', 'impact_theme_generator_tool'],
     memoryOptions: ['redis', 'cosmos-db', 'in-memory']
   },
@@ -42,7 +53,17 @@ const SCIP_AGENTS = {
       avg_tokens_per_request: 8000,
       requests_per_4cs_calculation: 3
     },
-    llmOptions: ['gpt-4o', 'claude-3.5-opus', 'gpt-4-turbo'],
+    llmOptions: [
+      // Cheap models
+      'gpt-5-nano', 'gemini-1.5-flash-8b', 'gpt-4.1-nano', 'gpt-4o-mini', 'claude-3-haiku',
+      // Mid-range models
+      'claude-3-5-haiku', 'claude-4-5-haiku', 'o3-mini', 'gpt-4.1', 'gpt-4o',
+      // Expensive models
+      'o3-deep-research', 'o1', 'claude-opus-4', 'gpt-5-pro', 'o3-pro',
+      // On-premise models
+      'llama-3-8b', 'llama-3.1-8b', 'mistral-7b', 'phi-3-mini', 'gemma-7b',
+      'llama-3-70b', 'llama-3.1-70b', 'mistral-medium', 'mixtral-8x7b'
+    ],
     toolsOptions: ['research_tool', 'fog_analysis_tool', 'impact_theme_generator_tool', 'find_money_validator_tool'],
     memoryOptions: ['cosmos-db', 'azure-sql', 'redis']
   },
@@ -204,27 +225,295 @@ const SalesCoach = () => {
     // Initialize with default configs
     const configs = {};
     Object.keys(SCIP_AGENTS).forEach(agentId => {
-      configs[agentId] = { ...SCIP_AGENTS[agentId].defaultConfig };
+      configs[agentId] = {
+        ...SCIP_AGENTS[agentId].defaultConfig,
+        deployment_type: 'cloud_api' // Each agent has its own deployment type
+      };
     });
     return configs;
   });
 
-  // Global parameters
+  // Global parameters including service tier
   const [globalParams, setGlobalParams] = useState({
     num_users: 100,
-    assessments_per_user_per_month: 40 // 10 deals x 4 assessments each
+    assessments_per_user_per_month: 40, // 10 deals x 4 assessments each
+    service_tier: 'premium' // Default to premium
   });
+
+  // Service tiers state
+  const [tierModels, setTierModels] = useState({ cloud_api: [], on_premise: [] });
+  const [tierData, setTierData] = useState({}); // Store full tier information including costs
+  const [tierCosts, setTierCosts] = useState({ basic: null, standard: null, premium: null }); // Per-user costs for each tier
+  const [tierCostBreakdown, setTierCostBreakdown] = useState(null); // Detailed breakdown for selected tier
 
   // Popup state for info modal
   const [showInfoPopup, setShowInfoPopup] = useState(false);
 
+  // Cost details tabs state
+  const [costDetailsTab, setCostDetailsTab] = useState('overview');
+
+  // Individual agent cost calculation
+  const [agentCosts, setAgentCosts] = useState({});
+
+  // Calculate individual agent cost (LLM only)
+  const calculateAgentCost = async (agentId, config) => {
+    try {
+      const response = await axios.post('/api/cost/calculate-agent', {
+        llm_model: config.llm,
+        deployment_type: config.deployment_type || 'cloud_api',
+        num_users: globalParams.num_users,
+        queries_per_user_per_month: globalParams.assessments_per_user_per_month,
+        avg_tokens_per_request: config.avg_tokens_per_request || 5000,
+        cache_hit_rate: 0.70,
+        use_prompt_caching: true
+      });
+
+      return response.data.agent_llm_cost_monthly;
+    } catch (error) {
+      console.error(`Error calculating cost for ${agentId}:`, error);
+      return 0;
+    }
+  };
+
+  // Update agent cost when configuration changes
+  const updateAgentCost = async (agentId) => {
+    const config = agentConfigs[agentId];
+    if (config) {
+      const cost = await calculateAgentCost(agentId, config);
+      setAgentCosts(prev => ({ ...prev, [agentId]: cost }));
+    }
+  };
+
+  // Calculate costs when agent configs or global params change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      Object.keys(agentConfigs).forEach(agentId => {
+        updateAgentCost(agentId);
+      });
+    }, 500); // Debounce to avoid too many API calls
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentConfigs, globalParams]);
+
+  // Fetch available service tiers from backend
+  useEffect(() => {
+    const fetchTiers = async () => {
+      try {
+        const response = await axios.get('/api/cost/tiers');
+        if (response.data && response.data.tiers) {
+          // Convert array to object for easier lookup
+          const tiersObj = {};
+          response.data.tiers.forEach(tier => {
+            tiersObj[tier.tier_id] = tier;
+          });
+          setTierData(tiersObj);
+        }
+      } catch (error) {
+        console.error('Error fetching service tiers:', error);
+      }
+    };
+    fetchTiers();
+  }, []);
+
+  // Calculate per-user costs for ALL tiers when num_users or assessments change
+  useEffect(() => {
+    const calculateAllTierCosts = async () => {
+      try {
+        const tiers = ['basic', 'standard', 'premium'];
+        const costs = {};
+
+        // Get actual LLM cost from agents
+        const actualLLMCost = getActualLLMCost();
+
+        // Calculate cost for each tier in parallel
+        const promises = tiers.map(async (tier) => {
+          const response = await axios.post('/api/cost/calculate', {
+            agent_type: 'sales-coach',
+            service_tier: tier,
+            deployment_type: 'cloud_api',
+            num_users: globalParams.num_users,
+            queries_per_user_per_month: globalParams.assessments_per_user_per_month
+          });
+
+          if (response.data) {
+            // Replace backend's LLM cost with actual agent costs
+            const actualTotalCost = response.data.infrastructure_costs +
+                                   actualLLMCost +
+                                   response.data.memory_system_costs +
+                                   response.data.data_source_costs +
+                                   response.data.monitoring_costs +
+                                   response.data.retrieval_costs +
+                                   response.data.security_costs +
+                                   response.data.prompt_tuning_costs +
+                                   (response.data.mcp_tools_costs || 0);
+
+            // Calculate per-user cost for this tier
+            costs[tier] = Math.round(actualTotalCost / globalParams.num_users);
+          }
+        });
+
+        await Promise.all(promises);
+        setTierCosts(costs);
+      } catch (error) {
+        console.error('Error calculating tier costs:', error);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      calculateAllTierCosts();
+    }, 800); // Debounce
+
+    return () => clearTimeout(timer);
+  }, [globalParams.num_users, globalParams.assessments_per_user_per_month, agentCosts, agentConfigs]);
+
+  // Fetch detailed cost breakdown for the currently selected tier
+  useEffect(() => {
+    const fetchTierBreakdown = async () => {
+      try {
+        const response = await axios.post('/api/cost/calculate', {
+          agent_type: 'sales-coach',
+          service_tier: globalParams.service_tier,
+          deployment_type: 'cloud_api',
+          num_users: globalParams.num_users,
+          queries_per_user_per_month: globalParams.assessments_per_user_per_month
+        });
+
+        if (response.data) {
+          setTierCostBreakdown(response.data);
+        }
+      } catch (error) {
+        console.error('Error fetching tier breakdown:', error);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      fetchTierBreakdown();
+    }, 800); // Debounce
+
+    return () => clearTimeout(timer);
+  }, [globalParams.service_tier, globalParams.num_users, globalParams.assessments_per_user_per_month]);
+
+  // Fetch available models for selected tier (both cloud_api and on_premise)
+  useEffect(() => {
+    const fetchTierModels = async () => {
+      if (!globalParams.service_tier) return;
+
+      try {
+        // Fetch both deployment types
+        const [cloudResponse, onPremResponse] = await Promise.all([
+          axios.get(`/api/cost/tiers/${globalParams.service_tier}/models`, {
+            params: { deployment_type: 'cloud_api' }
+          }),
+          axios.get(`/api/cost/tiers/${globalParams.service_tier}/models`, {
+            params: { deployment_type: 'on_premise' }
+          })
+        ]);
+
+        setTierModels({
+          cloud_api: cloudResponse.data?.models?.cloud_api || [],
+          on_premise: onPremResponse.data?.models?.on_premise || []
+        });
+      } catch (error) {
+        console.error('Error fetching tier models:', error);
+      }
+    };
+    fetchTierModels();
+  }, [globalParams.service_tier]);
+
   // Sync configuration changes to AppContext (for Cost Calculator)
   useEffect(() => {
-    updateSalesCoachConfig(globalParams, agentConfigs);
-  }, [globalParams, agentConfigs, updateSalesCoachConfig]);
+    updateSalesCoachConfig(globalParams, agentConfigs, agentCosts);
+  }, [globalParams, agentConfigs, agentCosts, updateSalesCoachConfig]);
+
+  // Reset LLM models when tier changes or agent's deployment type changes
+  useEffect(() => {
+    // Check each agent and reset LLM if not available in current tier/deployment combo
+    const updatedConfigs = { ...agentConfigs };
+    let hasChanges = false;
+
+    Object.keys(updatedConfigs).forEach(agentId => {
+      const config = updatedConfigs[agentId];
+      const agent = SCIP_AGENTS[agentId];
+      const deploymentType = config.deployment_type || 'cloud_api';
+      const availableModels = tierModels[deploymentType] || [];
+
+      if (availableModels.length === 0) return;
+
+      const availableModelIds = availableModels.map(m => m.id);
+
+      if (config.llm && !availableModelIds.includes(config.llm)) {
+        // Find first available model for this agent that's in the tier
+        const firstAvailableModel = agent.llmOptions.find(model => availableModelIds.includes(model));
+
+        if (firstAvailableModel) {
+          updatedConfigs[agentId] = { ...config, llm: firstAvailableModel };
+          hasChanges = true;
+        }
+      }
+    });
+
+    if (hasChanges) {
+      setAgentConfigs(updatedConfigs);
+    }
+  }, [globalParams.service_tier, tierModels, agentConfigs]);
 
   const currentAgent = SCIP_AGENTS[activeAgent];
   const currentConfig = agentConfigs[activeAgent];
+
+  // Get per-user per-month cost for a specific tier
+  const getPerUserCost = (tierKey) => {
+    // Use pre-calculated cost for this specific tier
+    if (tierCosts[tierKey]) {
+      return tierCosts[tierKey];
+    }
+    // Use target prices as fallback while calculating
+    const targets = { basic: 30, standard: 149, premium: 999 };
+    return targets[tierKey] || 0;
+  };
+
+  // Calculate actual total LLM cost from individual agent costs (weighted by usage probability)
+  const getActualLLMCost = () => {
+    let totalLLMCost = 0;
+    Object.entries(agentConfigs).forEach(([agentId, config]) => {
+      const agentCost = agentCosts[agentId] || 0;
+      const probability = (config.usage_probability || 0) / 100;
+      totalLLMCost += agentCost * probability;
+    });
+    return totalLLMCost;
+  };
+
+  // Format currency helper
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-AU', {
+      style: 'currency',
+      currency: 'AUD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(amount);
+  };
+
+  // Format number helper
+  const formatNumber = (num) => {
+    return new Intl.NumberFormat('en-AU').format(num);
+  };
+
+  // Get filtered LLM options based on selected tier and agent's deployment type
+  const getFilteredLLMOptions = () => {
+    const deploymentType = currentConfig.deployment_type || 'cloud_api';
+    const availableModels = tierModels[deploymentType] || [];
+
+    if (availableModels.length === 0) {
+      // Fallback to agent's default options if tier models not loaded
+      return currentAgent.llmOptions;
+    }
+
+    // Get model IDs from tier configuration
+    const availableModelIds = availableModels.map(m => m.id);
+
+    // Filter agent's LLM options to only include models available in the selected tier
+    return currentAgent.llmOptions.filter(model => availableModelIds.includes(model));
+  };
 
   const handleConfigChange = (field, value) => {
     setAgentConfigs(prev => ({
@@ -234,6 +523,13 @@ const SalesCoach = () => {
         [field]: value
       }
     }));
+    
+    // Trigger cost recalculation for this agent when LLM or other key parameters change
+    if (['llm', 'deployment_type', 'memory_type', 'avg_tokens_per_request'].includes(field)) {
+      setTimeout(() => {
+        updateAgentCost(activeAgent);
+      }, 100); // Small delay to ensure state is updated
+    }
   };
 
   const handleToolToggle = (tool) => {
@@ -248,35 +544,7 @@ const SalesCoach = () => {
     setGlobalParams(prev => ({ ...prev, [field]: value }));
   };
 
-  // Calculate estimated monthly cost based on agent configuration
-  const calculateAgentCost = () => {
-    const config = agentConfigs[activeAgent];
-    const totalRequests = globalParams.num_users * globalParams.assessments_per_user_per_month;
-    const agentRequests = (totalRequests * config.usage_probability / 100) * config.requests_per_4cs_calculation;
-
-    // LLM pricing (simplified - should match backend)
-    const llmPricing = {
-      'gpt-4o': { input: 2.50, output: 10.00 },
-      'gpt-4-turbo': { input: 10.00, output: 30.00 },
-      'claude-3.5-sonnet': { input: 3.00, output: 15.00 },
-      'claude-3.5-opus': { input: 15.00, output: 75.00 }
-    };
-
-    const pricing = llmPricing[config.llm] || llmPricing['gpt-4o'];
-    const inputTokens = agentRequests * config.avg_tokens_per_request * 0.7; // 70% input
-    const outputTokens = agentRequests * config.avg_tokens_per_request * 0.3; // 30% output
-
-    const monthlyCostUSD = (inputTokens / 1000000 * pricing.input) + (outputTokens / 1000000 * pricing.output);
-    const monthlyCostAUD = monthlyCostUSD / 0.65; // USD to AUD
-
-    return {
-      monthlyAUD: monthlyCostAUD,
-      annualAUD: monthlyCostAUD * 12,
-      requests: agentRequests
-    };
-  };
-
-  const agentCost = calculateAgentCost();
+  // Individual agent cost is now calculated via API calls
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 p-6">
@@ -290,6 +558,253 @@ const SalesCoach = () => {
           <p className="text-gray-600">
             Configure the 9 optimized AI agents for ImpactWon 4Cs assessment • Lean Agents + Rich Tools Architecture
           </p>
+        </div>
+
+        {/* Service Tier Selection */}
+        <div className="bg-gradient-to-br from-purple-50 via-indigo-50 to-blue-50 rounded-2xl p-8 shadow-xl border-2 border-indigo-200 mb-6">
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold text-gray-900 flex items-center">
+              <Award className="w-7 h-7 text-indigo-600 mr-3" />
+              Service Tier Selection
+            </h2>
+            <p className="text-sm text-gray-600 mt-2">
+              Choose your service tier to automatically configure LLM models, infrastructure, and features.
+              Select deployment type (Cloud API / On-Premise) for each agent below.
+            </p>
+          </div>
+
+          {/* Tier Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Basic Tier */}
+            <div
+              onClick={() => handleGlobalParamChange('service_tier', 'basic')}
+              className={`cursor-pointer rounded-xl p-6 transition-all transform hover:scale-105 ${
+                globalParams.service_tier === 'basic'
+                  ? 'bg-gradient-to-br from-green-500 to-emerald-600 text-white shadow-2xl ring-4 ring-green-300'
+                  : 'bg-white text-gray-900 shadow-lg hover:shadow-xl border-2 border-gray-200'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center">
+                  <Sparkles className={`w-6 h-6 mr-2 ${globalParams.service_tier === 'basic' ? 'text-white' : 'text-green-600'}`} />
+                  <h3 className="text-xl font-bold">Basic</h3>
+                </div>
+                {globalParams.service_tier === 'basic' && (
+                  <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center">
+                    <div className="w-3 h-3 bg-green-600 rounded-full"></div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mb-4">
+                <div className="text-4xl font-bold mb-1">
+                  ${getPerUserCost('basic')}
+                  <span className="text-lg font-normal opacity-80">/user/mo</span>
+                </div>
+                <p className={`text-sm ${globalParams.service_tier === 'basic' ? 'text-white opacity-90' : 'text-gray-600'}`}>
+                  Cost-optimized for startups
+                </p>
+              </div>
+
+              <div className={`space-y-2 text-sm ${globalParams.service_tier === 'basic' ? 'text-white' : 'text-gray-700'}`}>
+                <div className="flex items-center">
+                  <span className="mr-2">✓</span>
+                  <span>50 queries/user/month</span>
+                </div>
+                <div className="flex items-center">
+                  <span className="mr-2">✓</span>
+                  <span>Cheap LLM models</span>
+                </div>
+                <div className="flex items-center">
+                  <span className="mr-2">✓</span>
+                  <span>Basic infrastructure</span>
+                </div>
+                <div className="flex items-center">
+                  <span className="mr-2">✓</span>
+                  <span>In-memory storage</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Standard Tier */}
+            <div
+              onClick={() => handleGlobalParamChange('service_tier', 'standard')}
+              className={`cursor-pointer rounded-xl p-6 transition-all transform hover:scale-105 ${
+                globalParams.service_tier === 'standard'
+                  ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-2xl ring-4 ring-blue-300'
+                  : 'bg-white text-gray-900 shadow-lg hover:shadow-xl border-2 border-gray-200'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center">
+                  <Award className={`w-6 h-6 mr-2 ${globalParams.service_tier === 'standard' ? 'text-white' : 'text-blue-600'}`} />
+                  <h3 className="text-xl font-bold">Standard</h3>
+                </div>
+                {globalParams.service_tier === 'standard' && (
+                  <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center">
+                    <div className="w-3 h-3 bg-blue-600 rounded-full"></div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mb-4">
+                <div className="text-4xl font-bold mb-1">
+                  ${getPerUserCost('standard')}
+                  <span className="text-lg font-normal opacity-80">/user/mo</span>
+                </div>
+                <p className={`text-sm ${globalParams.service_tier === 'standard' ? 'text-white opacity-90' : 'text-gray-600'}`}>
+                  Balanced for production
+                </p>
+              </div>
+
+              <div className={`space-y-2 text-sm ${globalParams.service_tier === 'standard' ? 'text-white' : 'text-gray-700'}`}>
+                <div className="flex items-center">
+                  <span className="mr-2">✓</span>
+                  <span>500 queries/user/month</span>
+                </div>
+                <div className="flex items-center">
+                  <span className="mr-2">✓</span>
+                  <span>Mid-range LLM models</span>
+                </div>
+                <div className="flex items-center">
+                  <span className="mr-2">✓</span>
+                  <span>Standard infrastructure</span>
+                </div>
+                <div className="flex items-center">
+                  <span className="mr-2">✓</span>
+                  <span>Redis + Data sources</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Premium Tier */}
+            <div
+              onClick={() => handleGlobalParamChange('service_tier', 'premium')}
+              className={`cursor-pointer rounded-xl p-6 transition-all transform hover:scale-105 ${
+                globalParams.service_tier === 'premium'
+                  ? 'bg-gradient-to-br from-purple-600 to-pink-600 text-white shadow-2xl ring-4 ring-purple-300'
+                  : 'bg-white text-gray-900 shadow-lg hover:shadow-xl border-2 border-gray-200'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center">
+                  <Crown className={`w-6 h-6 mr-2 ${globalParams.service_tier === 'premium' ? 'text-yellow-300' : 'text-purple-600'}`} />
+                  <h3 className="text-xl font-bold">Premium</h3>
+                </div>
+                {globalParams.service_tier === 'premium' && (
+                  <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center">
+                    <div className="w-3 h-3 bg-purple-600 rounded-full"></div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mb-4">
+                <div className="text-4xl font-bold mb-1">
+                  ${getPerUserCost('premium').toLocaleString()}
+                  <span className="text-lg font-normal opacity-80">/user/mo</span>
+                </div>
+                <p className={`text-sm ${globalParams.service_tier === 'premium' ? 'text-white opacity-90' : 'text-gray-600'}`}>
+                  Maximum performance
+                </p>
+              </div>
+
+              <div className={`space-y-2 text-sm ${globalParams.service_tier === 'premium' ? 'text-white' : 'text-gray-700'}`}>
+                <div className="flex items-center">
+                  <span className="mr-2">✓</span>
+                  <span>Unlimited queries</span>
+                </div>
+                <div className="flex items-center">
+                  <span className="mr-2">✓</span>
+                  <span>All LLM models</span>
+                </div>
+                <div className="flex items-center">
+                  <span className="mr-2">✓</span>
+                  <span>Premium infrastructure</span>
+                </div>
+                <div className="flex items-center">
+                  <span className="mr-2">✓</span>
+                  <span>All features + Compliance</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Cost Breakdown for Selected Tier */}
+          {globalParams.service_tier && tierCostBreakdown && (() => {
+            // Calculate actual LLM cost from individual agents
+            const actualLLMCost = getActualLLMCost();
+
+            // Calculate actual total cost (replace backend's incorrect LLM cost with actual sum)
+            const actualTotalCost = tierCostBreakdown.infrastructure_costs +
+                                   actualLLMCost +
+                                   tierCostBreakdown.memory_system_costs +
+                                   tierCostBreakdown.data_source_costs +
+                                   tierCostBreakdown.monitoring_costs +
+                                   tierCostBreakdown.retrieval_costs +
+                                   tierCostBreakdown.security_costs +
+                                   tierCostBreakdown.prompt_tuning_costs +
+                                   (tierCostBreakdown.mcp_tools_costs || 0);
+
+            return (
+              <div className="mt-6 p-5 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl border-2 border-indigo-200 shadow-md">
+                <h3 className="text-lg font-bold text-indigo-900 mb-3 flex items-center">
+                  <DollarSign className="w-5 h-5 mr-2" />
+                  {globalParams.service_tier.charAt(0).toUpperCase() + globalParams.service_tier.slice(1)} Tier - Cost Calculation
+                </h3>
+
+                <div className="space-y-2 text-sm">
+                  {/* Total Monthly Cost */}
+                  <div className="flex justify-between items-center py-2 border-b border-indigo-200">
+                    <span className="font-semibold text-gray-700">Total Monthly Cost:</span>
+                    <span className="font-bold text-indigo-900">${actualTotalCost.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                  </div>
+
+                  {/* Cost Components */}
+                  <div className="pl-3 space-y-1 text-gray-600">
+                    <div className="flex justify-between">
+                      <span>• Infrastructure:</span>
+                      <span className="font-medium">${tierCostBreakdown.infrastructure_costs.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>• LLM Costs (from agents):</span>
+                      <span className="font-medium">${actualLLMCost.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>• Memory (Cosmos DB):</span>
+                      <span className="font-medium">${tierCostBreakdown.memory_system_costs.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>• Data Sources:</span>
+                      <span className="font-medium">${tierCostBreakdown.data_source_costs.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>• Monitoring & Other:</span>
+                      <span className="font-medium">${(tierCostBreakdown.monitoring_costs + tierCostBreakdown.retrieval_costs + tierCostBreakdown.security_costs + tierCostBreakdown.prompt_tuning_costs).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                    </div>
+                  </div>
+
+                  {/* Per User Calculation */}
+                  <div className="flex justify-between items-center py-2 border-t-2 border-indigo-300 mt-2 pt-2">
+                    <span className="font-semibold text-gray-700">Number of Users:</span>
+                    <span className="font-bold text-indigo-900">{globalParams.num_users}</span>
+                  </div>
+
+                  {/* Final Per-User Cost */}
+                  <div className="flex justify-between items-center py-3 bg-indigo-100 rounded-lg px-3 border border-indigo-300">
+                    <span className="font-bold text-indigo-900">Cost Per User Per Month:</span>
+                    <span className="text-xl font-bold text-indigo-900">
+                      ${Math.round(actualTotalCost / globalParams.num_users).toLocaleString()}
+                    </span>
+                  </div>
+
+                  {/* Formula */}
+                  <div className="text-xs text-gray-500 italic mt-2 text-center">
+                    Formula: Total Monthly Cost (${actualTotalCost.toLocaleString(undefined, {maximumFractionDigits: 0})}) ÷ {globalParams.num_users} users = ${Math.round(actualTotalCost / globalParams.num_users)}/user/month
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Global Parameters */}
@@ -543,15 +1058,64 @@ const SalesCoach = () => {
                     <Brain className="w-4 h-4 mr-2" />
                     LLM Model
                   </label>
+
+                  {/* Deployment Type Toggle */}
+                  <div className="flex bg-white rounded-lg p-1 shadow-sm border border-purple-300 mb-3">
+                    <button
+                      onClick={() => handleConfigChange('deployment_type', 'cloud_api')}
+                      className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-all ${
+                        (currentConfig.deployment_type || 'cloud_api') === 'cloud_api'
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Cloud API
+                    </button>
+                    <button
+                      onClick={() => handleConfigChange('deployment_type', 'on_premise')}
+                      className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-all ${
+                        currentConfig.deployment_type === 'on_premise'
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      On-Premise
+                    </button>
+                  </div>
+
                   <select
                     value={currentConfig.llm}
                     onChange={(e) => handleConfigChange('llm', e.target.value)}
                     className="w-full rounded-md border-purple-300 shadow-sm p-3 bg-white"
                   >
-                    {currentAgent.llmOptions.map(model => (
+                    {getFilteredLLMOptions().map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                   </select>
+                  {getFilteredLLMOptions().length === 0 && (
+                    <p className="mt-2 text-xs text-red-600">
+                      No models available for this tier. Please select a different tier.
+                    </p>
+                  )}
+                  {getFilteredLLMOptions().length < currentAgent.llmOptions.length && (
+                    <p className="mt-2 text-xs text-purple-600">
+                      {currentAgent.llmOptions.length - getFilteredLLMOptions().length} model(s) unavailable in {globalParams.service_tier} tier
+                    </p>
+                  )}
+                  {/* Estimated Cost Display */}
+                  <div className="mt-3 p-3 bg-white rounded-lg border border-purple-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-purple-900">Estimated Cost (This Agent Only):</span>
+                      <span className="text-lg font-bold text-purple-700">
+                        ${agentCosts[activeAgent] ? agentCosts[activeAgent].toLocaleString('en-US', { maximumFractionDigits: 0 }) : '...'}
+                        <span className="text-sm font-normal text-gray-600">/month</span>
+                      </span>
+                    </div>
+                    <p className="text-xs text-purple-600 mt-1">
+                      Based on {globalParams.num_users} users × {globalParams.assessments_per_user_per_month} assessments
+                    </p>
+                  </div>
+
                   <div className="mt-3 grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-purple-700 mb-1">Temperature</label>
@@ -696,19 +1260,19 @@ const SalesCoach = () => {
                     <div className="bg-white rounded-lg p-4 border border-indigo-300">
                       <div className="text-xs text-indigo-600 font-medium mb-1">Monthly Cost</div>
                       <div className="text-2xl font-bold text-indigo-900">
-                        ${agentCost.monthlyAUD.toFixed(0)} AUD
+                        ${agentCosts[activeAgent] ? agentCosts[activeAgent].toFixed(0) : '...'} AUD
                       </div>
                     </div>
                     <div className="bg-white rounded-lg p-4 border border-indigo-300">
                       <div className="text-xs text-indigo-600 font-medium mb-1">Annual Cost</div>
                       <div className="text-2xl font-bold text-indigo-900">
-                        ${agentCost.annualAUD.toFixed(0)} AUD
+                        ${agentCosts[activeAgent] ? (agentCosts[activeAgent] * 12).toFixed(0) : '...'} AUD
                       </div>
                     </div>
                     <div className="bg-white rounded-lg p-3 border border-indigo-200">
                       <div className="text-xs text-gray-600">Estimated Requests/Month</div>
                       <div className="text-lg font-semibold text-gray-900">
-                        {agentCost.requests.toFixed(0)}
+                        {globalParams.num_users * globalParams.assessments_per_user_per_month}
                       </div>
                     </div>
                   </div>
@@ -732,6 +1296,294 @@ const SalesCoach = () => {
             </div>
           </div>
         </div>
+
+        {/* Cost Details Tabs */}
+        {tierCostBreakdown && (() => {
+          const actualLLMCost = getActualLLMCost();
+          const actualTotalCost = tierCostBreakdown.infrastructure_costs +
+                                 actualLLMCost +
+                                 tierCostBreakdown.memory_system_costs +
+                                 tierCostBreakdown.data_source_costs +
+                                 tierCostBreakdown.monitoring_costs +
+                                 tierCostBreakdown.retrieval_costs +
+                                 tierCostBreakdown.security_costs +
+                                 tierCostBreakdown.prompt_tuning_costs +
+                                 (tierCostBreakdown.mcp_tools_costs || 0);
+
+          return (
+            <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+              {/* Tabs Navigation */}
+              <div className="border-b border-gray-200 bg-gray-50">
+                <div className="flex overflow-x-auto">
+                  {['overview', 'infrastructure', 'llm', 'data-sources', 'monitoring'].map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setCostDetailsTab(tab)}
+                      className={`px-6 py-4 font-medium transition-colors whitespace-nowrap ${
+                        costDetailsTab === tab
+                          ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                      }`}
+                    >
+                      {tab === 'overview' && 'Overview'}
+                      {tab === 'infrastructure' && 'Infrastructure'}
+                      {tab === 'llm' && 'LLM'}
+                      {tab === 'data-sources' && 'Data Sources'}
+                      {tab === 'monitoring' && 'Monitoring'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tab Content */}
+              <div className="p-6">
+                {/* Overview Tab */}
+                {costDetailsTab === 'overview' && (
+                  <div className="space-y-6">
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-6 text-white shadow-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-sm font-medium opacity-90">Monthly Cost</h3>
+                          <DollarSign className="w-5 h-5 opacity-75" />
+                        </div>
+                        <p className="text-3xl font-bold">{formatCurrency(actualTotalCost)}</p>
+                        <p className="text-xs opacity-75 mt-1">Total system cost</p>
+                      </div>
+
+                      <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-6 text-white shadow-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-sm font-medium opacity-90">Per User/Month</h3>
+                          <Users className="w-5 h-5 opacity-75" />
+                        </div>
+                        <p className="text-3xl font-bold">{formatCurrency(actualTotalCost / globalParams.num_users)}</p>
+                        <p className="text-xs opacity-75 mt-1">{globalParams.num_users} users</p>
+                      </div>
+
+                      <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-6 text-white shadow-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-sm font-medium opacity-90">Per Query</h3>
+                          <Zap className="w-5 h-5 opacity-75" />
+                        </div>
+                        <p className="text-3xl font-bold">{formatCurrency(actualTotalCost / (globalParams.num_users * globalParams.assessments_per_user_per_month))}</p>
+                        <p className="text-xs opacity-75 mt-1">{formatNumber(globalParams.num_users * globalParams.assessments_per_user_per_month)} queries/mo</p>
+                      </div>
+
+                      <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-6 text-white shadow-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-sm font-medium opacity-90">Annual Cost</h3>
+                          <TrendingUp className="w-5 h-5 opacity-75" />
+                        </div>
+                        <p className="text-3xl font-bold">{formatCurrency(actualTotalCost * 12)}</p>
+                        <p className="text-xs opacity-75 mt-1">12-month projection</p>
+                      </div>
+                    </div>
+
+                    {/* Cost Breakdown */}
+                    <div className="bg-white rounded-xl border border-gray-200">
+                      <h3 className="text-xl font-bold text-gray-800 mb-4">Cost Breakdown</h3>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                          <div className="flex items-center">
+                            <Server className="w-5 h-5 mr-3 text-blue-600" />
+                            <span className="font-medium text-gray-700">Infrastructure</span>
+                          </div>
+                          <span className="text-lg font-bold text-blue-900">{formatCurrency(tierCostBreakdown.infrastructure_costs)}</span>
+                        </div>
+
+                        <div className="flex items-center justify-between p-3 bg-purple-50 rounded-lg">
+                          <div className="flex items-center">
+                            <Zap className="w-5 h-5 mr-3 text-purple-600" />
+                            <span className="font-medium text-gray-700">LLM API Costs (from agents)</span>
+                          </div>
+                          <span className="text-lg font-bold text-purple-900">{formatCurrency(actualLLMCost)}</span>
+                        </div>
+
+                        <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                          <div className="flex items-center">
+                            <Database className="w-5 h-5 mr-3 text-green-600" />
+                            <span className="font-medium text-gray-700">Data Sources</span>
+                          </div>
+                          <span className="text-lg font-bold text-green-900">{formatCurrency(tierCostBreakdown.data_source_costs)}</span>
+                        </div>
+
+                        <div className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                          <div className="flex items-center">
+                            <BarChart3 className="w-5 h-5 mr-3 text-orange-600" />
+                            <span className="font-medium text-gray-700">Monitoring</span>
+                          </div>
+                          <span className="text-lg font-bold text-orange-900">{formatCurrency(tierCostBreakdown.monitoring_costs)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Infrastructure Tab */}
+                {costDetailsTab === 'infrastructure' && (
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-800 mb-4">Infrastructure Costs (Azure Australia East)</h3>
+                    {tierCostBreakdown.infrastructure_breakdown && tierCostBreakdown.infrastructure_breakdown.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b-2 border-gray-200">
+                              <th className="text-left py-3 px-4 font-semibold text-gray-700">Resource</th>
+                              <th className="text-right py-3 px-4 font-semibold text-gray-700">Quantity</th>
+                              <th className="text-right py-3 px-4 font-semibold text-gray-700">Monthly</th>
+                              <th className="text-right py-3 px-4 font-semibold text-gray-700">Annual</th>
+                              <th className="text-left py-3 px-4 font-semibold text-gray-700">Notes</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tierCostBreakdown.infrastructure_breakdown.map((item, idx) => (
+                              <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                                <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
+                                <td className="py-3 px-4 text-right text-gray-600">{item.quantity.toFixed(0)} {item.unit}</td>
+                                <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
+                                <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
+                                <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
+                              </tr>
+                            ))}
+                            <tr className="bg-blue-50 font-bold">
+                              <td className="py-3 px-4 text-gray-900" colSpan="2">Total Infrastructure</td>
+                              <td className="py-3 px-4 text-right text-blue-900">{formatCurrency(tierCostBreakdown.infrastructure_costs)}</td>
+                              <td className="py-3 px-4 text-right text-blue-900">{formatCurrency(tierCostBreakdown.infrastructure_costs * 12)}</td>
+                              <td></td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-gray-500">No infrastructure data available</p>
+                    )}
+                  </div>
+                )}
+
+                {/* LLM Tab */}
+                {costDetailsTab === 'llm' && (
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-800 mb-4">LLM Costs from Individual Agents</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b-2 border-gray-200">
+                            <th className="text-left py-3 px-4 font-semibold text-gray-700">Agent</th>
+                            <th className="text-left py-3 px-4 font-semibold text-gray-700">LLM Model</th>
+                            <th className="text-right py-3 px-4 font-semibold text-gray-700">Usage %</th>
+                            <th className="text-right py-3 px-4 font-semibold text-gray-700">Cost (100%)</th>
+                            <th className="text-right py-3 px-4 font-semibold text-gray-700">Weighted Cost</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(agentConfigs).map(([agentId, config]) => {
+                            const agentInfo = SCIP_AGENTS[agentId];
+                            const agentCost = agentCosts[agentId] || 0;
+                            const weightedCost = agentCost * (config.usage_probability / 100);
+
+                            return (
+                              <tr key={agentId} className="border-b border-gray-100 hover:bg-gray-50">
+                                <td className="py-3 px-4 font-medium text-gray-800">{agentInfo?.name || agentId}</td>
+                                <td className="py-3 px-4 text-gray-600">{config.llm || 'N/A'}</td>
+                                <td className="py-3 px-4 text-right text-gray-600">{config.usage_probability}%</td>
+                                <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(agentCost)}</td>
+                                <td className="py-3 px-4 text-right font-semibold text-purple-900">{formatCurrency(weightedCost)}</td>
+                              </tr>
+                            );
+                          })}
+                          <tr className="bg-purple-50 font-bold">
+                            <td className="py-3 px-4 text-gray-900" colSpan="4">Total LLM Costs</td>
+                            <td className="py-3 px-4 text-right text-purple-900">{formatCurrency(actualLLMCost)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Data Sources Tab */}
+                {costDetailsTab === 'data-sources' && (
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-800 mb-4">Premium Data Sources</h3>
+                    {tierCostBreakdown.data_source_breakdown && tierCostBreakdown.data_source_breakdown.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b-2 border-gray-200">
+                              <th className="text-left py-3 px-4 font-semibold text-gray-700">Data Source</th>
+                              <th className="text-right py-3 px-4 font-semibold text-gray-700">Monthly</th>
+                              <th className="text-right py-3 px-4 font-semibold text-gray-700">Annual</th>
+                              <th className="text-left py-3 px-4 font-semibold text-gray-700">Notes</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tierCostBreakdown.data_source_breakdown.map((item, idx) => (
+                              <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                                <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
+                                <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
+                                <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
+                                <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
+                              </tr>
+                            ))}
+                            <tr className="bg-green-50 font-bold">
+                              <td className="py-3 px-4 text-gray-900">Total Data Sources</td>
+                              <td className="py-3 px-4 text-right text-green-900">{formatCurrency(tierCostBreakdown.data_source_costs)}</td>
+                              <td className="py-3 px-4 text-right text-green-900">{formatCurrency(tierCostBreakdown.data_source_costs * 12)}</td>
+                              <td></td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-gray-500">No premium data sources for this tier</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Monitoring Tab */}
+                {costDetailsTab === 'monitoring' && (
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-800 mb-4">Monitoring & Observability</h3>
+                    {tierCostBreakdown.monitoring_breakdown && tierCostBreakdown.monitoring_breakdown.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b-2 border-gray-200">
+                              <th className="text-left py-3 px-4 font-semibold text-gray-700">Service</th>
+                              <th className="text-right py-3 px-4 font-semibold text-gray-700">Quantity</th>
+                              <th className="text-right py-3 px-4 font-semibold text-gray-700">Monthly</th>
+                              <th className="text-right py-3 px-4 font-semibold text-gray-700">Annual</th>
+                              <th className="text-left py-3 px-4 font-semibold text-gray-700">Description</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tierCostBreakdown.monitoring_breakdown.map((item, idx) => (
+                              <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                                <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
+                                <td className="py-3 px-4 text-right text-gray-600">{item.quantity.toFixed(0)} {item.unit}</td>
+                                <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
+                                <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
+                                <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
+                              </tr>
+                            ))}
+                            <tr className="bg-orange-50 font-bold">
+                              <td className="py-3 px-4 text-gray-900" colSpan="2">Total Monitoring</td>
+                              <td className="py-3 px-4 text-right text-orange-900">{formatCurrency(tierCostBreakdown.monitoring_costs)}</td>
+                              <td className="py-3 px-4 text-right text-orange-900">{formatCurrency(tierCostBreakdown.monitoring_costs * 12)}</td>
+                              <td></td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-gray-500">No monitoring data available</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Info Footer */}
         <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
