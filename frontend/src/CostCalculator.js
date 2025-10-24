@@ -8,14 +8,14 @@ const CostCalculator = () => {
   const { salesCoachConfig, getSalesCoachCostParams } = useAppContext();
   // Available AI Agents
   const [availableAgents, setAvailableAgents] = useState([]);
-  
+
   // Current selection and parameters
   const [selectedAgent, setSelectedAgent] = useState('sales-coach');
   const [agentDetails, setAgentDetails] = useState(null);
-  
+
   // Active tab
   const [activeTab, setActiveTab] = useState('overview');
-  
+
   // Cost calculation results
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -23,6 +23,7 @@ const CostCalculator = () => {
   // Parameters
   const [params, setParams] = useState({
     agent_type: 'sales-coach',
+    service_tier: 'standard',
     num_users: 100,
     queries_per_user_per_month: 1000,
     avg_input_tokens: 10000,
@@ -591,117 +592,35 @@ const CostCalculator = () => {
           </div>
         </div>
 
-        {/* Parameters Control */}
-        <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200 mb-6">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">Usage Parameters</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Number of Users: {params.num_users}
-              </label>
-              <input
-                type="range"
-                min="10"
-                max="1000"
-                step="10"
-                value={params.num_users}
-                onChange={(e) => handleParamChange('num_users', parseInt(e.target.value))}
-                className="w-full"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Queries per User/Month: {params.queries_per_user_per_month}
-              </label>
-              <input
-                type="range"
-                min="100"
-                max="5000"
-                step="100"
-                value={params.queries_per_user_per_month}
-                onChange={(e) => handleParamChange('queries_per_user_per_month', parseInt(e.target.value))}
-                className="w-full"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Infrastructure Scale: {params.infrastructure_scale}x
-              </label>
-              <input
-                type="range"
-                min="0.5"
-                max="3"
-                step="0.1"
-                value={params.infrastructure_scale}
-                onChange={(e) => handleParamChange('infrastructure_scale', parseFloat(e.target.value))}
-                className="w-full"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Cache Hit Rate: {(params.cache_hit_rate * 100).toFixed(0)}%
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="0.95"
-                step="0.05"
-                value={params.cache_hit_rate}
-                onChange={(e) => handleParamChange('cache_hit_rate', parseFloat(e.target.value))}
-                className="w-full"
-              />
-            </div>
-
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="caching"
-                checked={params.use_prompt_caching}
-                onChange={(e) => handleParamChange('use_prompt_caching', e.target.checked)}
-                className="mr-2"
-              />
-              <label htmlFor="caching" className="text-sm font-medium text-gray-700">
-                Use Prompt Caching (90% discount)
-              </label>
-            </div>
-
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="reserved"
-                checked={params.use_reserved_instances}
-                onChange={(e) => handleParamChange('use_reserved_instances', e.target.checked)}
-                className="mr-2"
-              />
-              <label htmlFor="reserved" className="text-sm font-medium text-gray-700">
-                Use Reserved Instances (40% off)
-              </label>
-            </div>
-          </div>
-
-          {/* LLM Mix */}
-          <div className="mt-6">
-            <h3 className="font-semibold text-gray-800 mb-3">LLM Model Mix</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {Object.entries(params.llm_mix).map(([model, percent]) => (
-                <div key={model}>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {model}: {percent.toFixed(0)}%
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="5"
-                    value={percent}
-                    onChange={(e) => handleLLMMixChange(model, e.target.value)}
-                    className="w-full"
-                  />
+        {/* Configuration Message */}
+        <div className="bg-gradient-to-r from-indigo-50 to-blue-50 rounded-xl p-6 shadow-lg border-2 border-indigo-200 mb-6">
+          <div className="flex items-start">
+            <Settings className="w-6 h-6 text-indigo-600 mr-3 mt-1 flex-shrink-0" />
+            <div className="flex-1">
+              <h3 className="text-lg font-bold text-gray-800 mb-2">Configure in Sales Coach Tab</h3>
+              <p className="text-gray-700 mb-3">
+                All configuration (Number of Users, Assessments per User, Agent Settings) is now managed in the
+                <strong className="text-indigo-600"> "Sales Coach in the Pocket"</strong> tab.
+              </p>
+              <div className="bg-white rounded-lg p-4 border border-indigo-200">
+                <p className="text-sm text-gray-600 mb-3">
+                  <strong>Current Configuration:</strong>
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-500">Users:</span>
+                    <div className="font-semibold text-gray-800">{params.num_users}</div>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Queries/User:</span>
+                    <div className="font-semibold text-gray-800">{params.queries_per_user_per_month}</div>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Agent Type:</span>
+                    <div className="font-semibold text-gray-800 capitalize">{selectedAgent.replace('-', ' ')}</div>
+                  </div>
                 </div>
-              ))}
+              </div>
             </div>
           </div>
         </div>

@@ -256,12 +256,136 @@ DATA_SOURCE_PRICING_USD = {
 AUD_TO_USD = 0.65
 
 # ===========================
+# SERVICE TIER CONFIGURATIONS
+# ===========================
+# These define the infrastructure and LLM configurations for each pricing tier
+
+SERVICE_TIERS = {
+    "basic": {
+        "name": "Basic Plan",
+        "target_price_per_user_monthly": 30.0,  # $30 per user per month
+        "description": "Best for: Low-volume use, rapid experimentation, minimal infrastructure",
+
+        # LLM Configuration - Cheapest models
+        "llm_mix": {
+            "gpt-3.5-turbo": 70.0,      # Extremely cost-effective
+            "claude-3-haiku": 30.0       # Most affordable Anthropic model
+        },
+        "use_prompt_caching": True,
+        "cache_hit_rate": 0.80,  # Higher cache for cost savings
+
+        # Infrastructure - Minimal (open-source alternatives)
+        "infrastructure_scale": 0.3,  # 30% of base infrastructure
+        "custom_infrastructure": {
+            "aks_nodes": 2,           # Minimal Kubernetes (down from 8)
+            "gpu_nodes": 0,           # No GPU
+            "sql_vcores": 2,          # Minimal SQL (down from 12)
+            "cosmos_ru": 0,           # No Cosmos DB - use open-source
+            "neo4j_nodes": 0,         # No Neo4j - use in-memory or SQLite
+            "storage_hot_tb": 0.02,   # 20 GB hot storage
+            "storage_cool_tb": 0.1    # 100 GB cool storage
+        },
+        "memory_type": "in_memory",   # Free in-memory (no Redis/Cosmos)
+        "use_reserved_instances": False,  # PAYG for flexibility
+
+        # Limits
+        "max_queries_per_user_per_month": 50,
+        "max_input_tokens": 5000,
+        "max_output_tokens": 500,
+        "data_sources_included": []  # No premium data sources
+    },
+
+    "standard": {
+        "name": "Standard Plan",
+        "target_price_per_user_monthly": 149.0,  # $149 per user per month
+        "description": "Best for: Production use with balanced cost/performance, hybrid approach",
+
+        # LLM Configuration - Hybrid (cheap for common, premium for complex)
+        "llm_mix": {
+            "gpt-3.5-turbo": 40.0,      # Common queries
+            "gpt-4o": 40.0,             # Complex queries
+            "claude-3-haiku": 20.0      # Fast responses
+        },
+        "use_prompt_caching": True,
+        "cache_hit_rate": 0.70,
+
+        # Infrastructure - Balanced
+        "infrastructure_scale": 0.6,  # 60% of base infrastructure
+        "custom_infrastructure": {
+            "aks_nodes": 5,           # Moderate Kubernetes (down from 8)
+            "gpu_nodes": 0,           # No GPU (using API-based LLMs)
+            "sql_vcores": 6,          # Moderate SQL (down from 12)
+            "cosmos_ru": 15000,       # Reduced Cosmos (down from 45000)
+            "neo4j_nodes": 1,         # Single Neo4j node (down from 2)
+            "storage_hot_tb": 5,      # 5 TB hot storage
+            "storage_cool_tb": 40     # 40 TB cool storage
+        },
+        "memory_type": "redis",       # Redis for caching
+        "use_reserved_instances": True,  # Cost savings
+
+        # Limits
+        "max_queries_per_user_per_month": 500,
+        "max_input_tokens": 10000,
+        "max_output_tokens": 2000,
+        "data_sources_included": ["linkedin_sales_navigator"]  # 1 data source
+    },
+
+    "premium": {
+        "name": "Premium Plan",
+        "target_price_per_user_monthly": 999.0,  # $999 per user per month
+        "description": "Best for: Enterprise, unlimited usage, best performance, all features",
+
+        # LLM Configuration - Best models
+        "llm_mix": {
+            "gpt-4o": 60.0,             # Primary model
+            "claude-3.5-sonnet": 30.0,  # Best Anthropic model
+            "o1-preview": 10.0          # Reasoning tasks
+        },
+        "use_prompt_caching": True,
+        "cache_hit_rate": 0.60,  # Lower cache (more fresh responses)
+
+        # Infrastructure - Full scale (150% for enterprise performance)
+        "infrastructure_scale": 1.5,
+        "custom_infrastructure": {
+            "aks_nodes": 12,          # Enhanced Kubernetes (up from 8)
+            "gpu_nodes": 2,           # GPU for local models if needed
+            "sql_vcores": 18,         # Enhanced SQL (up from 12)
+            "cosmos_ru": 67500,       # Enhanced Cosmos (up from 45000)
+            "neo4j_nodes": 3,         # HA Neo4j cluster (up from 2)
+            "storage_hot_tb": 25,     # 25 TB hot storage
+            "storage_cool_tb": 200    # 200 TB cool storage
+        },
+        "memory_type": "cosmos_db",   # Premium NoSQL memory
+        "use_reserved_instances": True,  # Cost savings
+
+        # Limits (unlimited)
+        "max_queries_per_user_per_month": 999999,  # Unlimited
+        "max_input_tokens": 100000,
+        "max_output_tokens": 10000,
+        "data_sources_included": [  # All data sources
+            "zoominfo",
+            "linkedin_sales_navigator",
+            "clearbit",
+            "news_apis",
+            "social_media_apis",
+            "company_data_apis"
+        ]
+    }
+}
+
+# ===========================
 # MODELS
 # ===========================
 
 class CostCalculatorRequest(BaseModel):
     # AI Agent Selection
     agent_type: str = Field(default="sales-coach", description="Type of AI agent")
+
+    # Service Tier Selection (NEW - for end-user pricing plans)
+    service_tier: str = Field(
+        default="standard",
+        description="Service tier: basic ($30/user), standard ($149/user), premium ($999/user)"
+    )
 
     # User Parameters
     num_users: int = Field(default=100, ge=1, le=10000)
@@ -737,33 +861,62 @@ def calculate_monitoring_costs(data_ingestion_gb: float) -> tuple[float, List[Co
     return total, breakdown
 
 
-def calculate_memory_system_costs(memory_type: str, capacity_gb: float = 6) -> tuple[float, List[CostBreakdown]]:
+def calculate_memory_system_costs(memory_type: str, infrastructure: Dict[str, float]) -> tuple[float, List[CostBreakdown]]:
     """
-    Calculate memory system costs based on user selection
+    Calculate memory system costs based on user selection and infrastructure configuration
     THIS ADDRESSES USER'S QUESTION: Memory selection now affects costs!
     """
     breakdown = []
 
-    # Calculate monthly cost based on memory type
+    # Calculate monthly cost based on memory type and infrastructure
     if memory_type == "redis":
         monthly_cost = AZURE_PRICING_SYDNEY["database"]["redis_c6"] * 730
-    elif memory_type == "cosmos_db":
-        monthly_cost = AZURE_PRICING_SYDNEY["database"]["cosmosdb_ru_100"] * (45000 / 100) * 730
-    elif memory_type == "neo4j":
-        neo4j_vm = AZURE_PRICING_SYDNEY["compute"]["Standard_D16s_v5"]
-        monthly_cost = neo4j_vm["payg"] * 730 * 2  # 2 nodes
-    else:  # in_memory
-        monthly_cost = 0.0
-
-    if monthly_cost > 0:
         breakdown.append(CostBreakdown(
             category="Memory System",
-            subcategory=f"{memory_type.replace('_', ' ').title()}",
+            subcategory="Redis Cache",
+            monthly_cost=monthly_cost,
+            annual_cost=monthly_cost * 12,
+            unit="cache",
+            quantity=1,
+            notes=f"Redis C6 (6GB) cache for session/response caching"
+        ))
+    elif memory_type == "cosmos_db":
+        # Use actual infrastructure configuration for Cosmos DB RU
+        cosmos_ru = infrastructure.get("cosmos_ru", 45000)
+        monthly_cost = AZURE_PRICING_SYDNEY["database"]["cosmosdb_ru_100"] * (cosmos_ru / 100) * 730
+        breakdown.append(CostBreakdown(
+            category="Memory System",
+            subcategory="Cosmos DB",
+            monthly_cost=monthly_cost,
+            annual_cost=monthly_cost * 12,
+            unit="RU/s",
+            quantity=cosmos_ru,
+            notes=f"{int(cosmos_ru):,} RU/s provisioned throughput"
+        ))
+    elif memory_type == "neo4j":
+        # Use actual infrastructure configuration for Neo4j nodes
+        neo4j_nodes = infrastructure.get("neo4j_nodes", 2)
+        neo4j_vm = AZURE_PRICING_SYDNEY["compute"]["Standard_D16s_v5"]
+        monthly_cost = neo4j_vm["payg"] * 730 * neo4j_nodes
+        breakdown.append(CostBreakdown(
+            category="Memory System",
+            subcategory="Neo4j Graph Database",
+            monthly_cost=monthly_cost,
+            annual_cost=monthly_cost * 12,
+            unit="nodes",
+            quantity=neo4j_nodes,
+            notes=f"Standard_D16s_v5 × {int(neo4j_nodes)} nodes"
+        ))
+    else:  # in_memory
+        monthly_cost = 0.0
+        breakdown.append(CostBreakdown(
+            category="Memory System",
+            subcategory="In-Memory",
             monthly_cost=monthly_cost,
             annual_cost=monthly_cost * 12,
             unit="system",
             quantity=1,
-            notes=f"Selected memory system: {memory_type}"
+            notes="Free in-memory storage (no persistence)"
         ))
 
     return monthly_cost, breakdown
@@ -807,6 +960,43 @@ def calculate_mcp_tools_costs(selected_tools: List[str], num_assessments: int = 
     return total_cost, breakdown
 
 
+def apply_service_tier_config(params: CostCalculatorRequest) -> CostCalculatorRequest:
+    """Apply service tier configuration to request parameters"""
+
+    # If service_tier is provided and exists in SERVICE_TIERS
+    if params.service_tier and params.service_tier.lower() in SERVICE_TIERS:
+        tier_config = SERVICE_TIERS[params.service_tier.lower()]
+
+        # Override LLM mix with tier configuration
+        params.llm_mix = tier_config["llm_mix"]
+
+        # Override caching settings
+        params.use_prompt_caching = tier_config["use_prompt_caching"]
+        params.cache_hit_rate = tier_config["cache_hit_rate"]
+
+        # Override infrastructure settings
+        params.infrastructure_scale = tier_config["infrastructure_scale"]
+        params.custom_infrastructure = tier_config["custom_infrastructure"]
+
+        # Override memory type
+        params.memory_type = tier_config["memory_type"]
+
+        # Override reserved instances setting
+        params.use_reserved_instances = tier_config["use_reserved_instances"]
+
+        # Apply usage limits (cap user inputs to tier limits)
+        if params.queries_per_user_per_month > tier_config["max_queries_per_user_per_month"]:
+            params.queries_per_user_per_month = tier_config["max_queries_per_user_per_month"]
+
+        if params.avg_input_tokens > tier_config["max_input_tokens"]:
+            params.avg_input_tokens = tier_config["max_input_tokens"]
+
+        if params.avg_output_tokens > tier_config["max_output_tokens"]:
+            params.avg_output_tokens = tier_config["max_output_tokens"]
+
+    return params
+
+
 # ===========================
 # API ENDPOINT
 # ===========================
@@ -814,6 +1004,9 @@ def calculate_mcp_tools_costs(selected_tools: List[str], num_assessments: int = 
 @router.post("/calculate", response_model=CostCalculatorResponse)
 async def calculate_costs(params: CostCalculatorRequest):
     """Calculate comprehensive costs for AI agent deployment"""
+
+    # Apply service tier configuration (Basic, Standard, Premium)
+    params = apply_service_tier_config(params)
 
     # Validate agent type
     if params.agent_type not in AI_AGENTS:
@@ -853,7 +1046,7 @@ async def calculate_costs(params: CostCalculatorRequest):
     # Calculate MEMORY SYSTEM costs (NEW - addresses user's question)
     memory_total, memory_breakdown = calculate_memory_system_costs(
         memory_type=params.memory_type,
-        capacity_gb=6.0  # Default capacity
+        infrastructure=infra
     )
 
     # Calculate MCP TOOLS costs (NEW - addresses user's question)
@@ -955,4 +1148,39 @@ async def get_agent_details(agent_id: str):
     return {
         "agent_id": agent_id,
         **AI_AGENTS[agent_id]
+    }
+
+
+@router.get("/tiers")
+async def list_service_tiers():
+    """Get list of available service tiers (Basic, Standard, Premium)"""
+    return {
+        "tiers": [
+            {
+                "id": key,
+                "name": value["name"],
+                "price_per_user_monthly": value["target_price_per_user_monthly"],
+                "description": value["description"],
+                "max_queries_per_user_per_month": value["max_queries_per_user_per_month"],
+                "max_input_tokens": value["max_input_tokens"],
+                "max_output_tokens": value["max_output_tokens"],
+                "memory_type": value["memory_type"],
+                "llm_mix": value["llm_mix"],
+                "data_sources_included": value["data_sources_included"]
+            }
+            for key, value in SERVICE_TIERS.items()
+        ]
+    }
+
+
+@router.get("/tiers/{tier_id}")
+async def get_tier_details(tier_id: str):
+    """Get detailed information about a specific service tier"""
+    if tier_id.lower() not in SERVICE_TIERS:
+        raise HTTPException(status_code=404, detail=f"Tier {tier_id} not found")
+
+    tier_config = SERVICE_TIERS[tier_id.lower()]
+    return {
+        "tier_id": tier_id.lower(),
+        **tier_config
     }

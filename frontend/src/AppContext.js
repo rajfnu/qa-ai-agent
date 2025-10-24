@@ -45,6 +45,7 @@ export const AppProvider = ({ children }) => {
     let totalOutputTokens = 0;
     let totalWeight = 0;
     const llmWeights = {}; // Track weight per LLM model
+    const memoryWeights = {}; // Track weight per memory type
 
     Object.values(agentConfigs).forEach(config => {
       if (config.usage_probability > 0) {
@@ -62,6 +63,11 @@ export const AppProvider = ({ children }) => {
         // Track LLM usage weight
         if (config.llm) {
           llmWeights[config.llm] = (llmWeights[config.llm] || 0) + weight;
+        }
+
+        // Track memory type usage weight
+        if (config.memory_type) {
+          memoryWeights[config.memory_type] = (memoryWeights[config.memory_type] || 0) + weight;
         }
       }
     });
@@ -83,6 +89,14 @@ export const AppProvider = ({ children }) => {
       llm_mix['llama-3.1-70b'] = 10.0;
     }
 
+    // Determine primary memory type (most used by weight)
+    let primaryMemoryType = 'redis'; // Default fallback
+    if (Object.keys(memoryWeights).length > 0) {
+      primaryMemoryType = Object.keys(memoryWeights).reduce((a, b) => 
+        memoryWeights[a] > memoryWeights[b] ? a : b
+      );
+    }
+
     return {
       // NOTE: agent_type is NOT included here - it will be preserved by the merge in CostCalculator
       num_users: globalParams.num_users || 100,
@@ -90,6 +104,7 @@ export const AppProvider = ({ children }) => {
       avg_input_tokens,
       avg_output_tokens,
       llm_mix,
+      memory_type: primaryMemoryType, // Include memory type from Sales Coach config
       infrastructure_scale: 1.0,
       cache_hit_rate: 0.70,
       use_prompt_caching: true,
