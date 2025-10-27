@@ -14,7 +14,10 @@
       "Bash(cat:*)",
       "Bash(chmod:*)",
       "Bash(/tmp/comprehensive_test_suite.sh)",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python:*)",
+      "Bash(xargs kill:*)"
     ],
     "deny": [],
     "ask": []

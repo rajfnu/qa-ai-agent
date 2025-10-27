@@ -197,11 +197,41 @@ class CostBreakdown(BaseModel):
     quantity: float
     notes: str
 
+    # NEW: Enhanced explanation fields
+    calculation_formula: Optional[str] = None
+    cost_drivers: Optional[List[str]] = None
+    optimization_tips: Optional[List[str]] = None
+
 class AgentArchitecture(BaseModel):
     name: str
     description: str
     data_sources: List[str]
     infrastructure: Dict[str, float]
+
+class GlobalUsageMetrics(BaseModel):
+    """Detailed per-user usage metrics"""
+    # Per-User Metrics
+    tokens_per_user_per_month: int
+    input_tokens_per_user_per_month: int
+    output_tokens_per_user_per_month: int
+    queries_per_user_per_month: int
+    storage_per_user_gb: float
+    cost_per_user_per_month: float
+
+    # Aggregate Metrics
+    total_users: int
+    total_tokens_per_month: int
+    total_storage_gb: float
+    total_queries_per_month: int
+
+    # Efficiency Metrics
+    cache_hit_rate: float
+    avg_tokens_per_query: int
+    cost_per_query: float
+    cost_per_1k_tokens: float
+
+    # Descriptive Text
+    description: str = "Detailed breakdown of usage parameters normalized per user"
 
 class CostCalculatorResponse(BaseModel):
     # Total Costs
@@ -237,6 +267,9 @@ class CostCalculatorResponse(BaseModel):
     estimated_data_size_gb: float
     savings_from_caching: float
     savings_from_reserved_instances: float
+
+    # NEW: Global Usage Parameters with detailed per-user metrics
+    global_usage_metrics: GlobalUsageMetrics
 
 # ===========================
 # COST CALCULATION FUNCTIONS
@@ -338,49 +371,108 @@ def calculate_llm_costs(
     avg_input_tokens: int,
     avg_output_tokens: int,
     cache_hit_rate: float,
-    use_prompt_caching: bool
+    use_prompt_caching: bool,
+    deployment_type: str = "cloud_api",
+    service_tier: str = "standard"
 ) -> tuple[float, List[CostBreakdown]]:
-    """Calculate LLM costs based on token usage and pricing"""
+    """Calculate LLM costs based on deployment type: Cloud API (token-based) or On-Premise (GPU-based)"""
     breakdown = []
     total = 0.0
 
-    for model, percentage in llm_mix.items():
-        if percentage <= 0:
-            continue
+    # Handle On-Premise deployment (GPU-based pricing)
+    if deployment_type == "on_premise":
+        from config.service_tiers import LLM_CATEGORIES, GPU_COSTS
 
-        # Get pricing for this model
-        pricing = LLM_PRICING_USD.get(model, {"input": 2.50, "output": 10.00, "cache_read": 1.25})
-        
-        # Calculate tokens for this model
-        model_queries = total_queries * (percentage / 100)
-        input_tokens = model_queries * avg_input_tokens
-        output_tokens = model_queries * avg_output_tokens
+        # Determine number of GPUs based on tier
+        gpu_count = {
+            "basic": 1,      # 1 GPU for basic tier
+            "standard": 2,   # 2 GPUs for standard tier
+            "premium": 4     # 4 GPUs for premium tier
+        }.get(service_tier.lower(), 1)
 
-        # Apply caching
-        if use_prompt_caching and "cache_read" in pricing:
-            cached_input_tokens = input_tokens * cache_hit_rate
-            fresh_input_tokens = input_tokens * (1 - cache_hit_rate)
-            
-            # Cost calculation
-            input_cost = (cached_input_tokens / 1000000 * pricing["cache_read"] + 
-                         fresh_input_tokens / 1000000 * pricing["input"])
-        else:
-            input_cost = input_tokens / 1000000 * pricing["input"]
-        
-        output_cost = output_tokens / 1000000 * pricing["output"]
-        model_cost = (input_cost + output_cost) / AUD_TO_USD  # Convert to AUD
-        
-        total += model_cost
-        
-        breakdown.append(CostBreakdown(
-            category="LLM Costs",
-            subcategory=model,
-            monthly_cost=model_cost,
-            annual_cost=model_cost * 12,
-            unit="tokens",
-            quantity=input_tokens + output_tokens,
-            notes=f"{percentage}% of queries, {cache_hit_rate*100:.0f}% cache hit rate"
-        ))
+        for model, percentage in llm_mix.items():
+            if percentage <= 0:
+                continue
+
+            # Find GPU type for this model
+            gpu_type = "A100"  # Default
+            for category in LLM_CATEGORIES.values():
+                for model_info in category.get("on_premise", []):
+                    if model_info["id"] == model:
+                        gpu_type = model_info.get("gpu_type", "A100")
+                        break
+
+            # Calculate GPU cost for full month (730 hours)
+            gpu_hourly_cost = GPU_COSTS[gpu_type]["hourly_cost"]
+            monthly_cost_per_gpu_usd = gpu_hourly_cost * 730
+            total_gpu_cost_usd = monthly_cost_per_gpu_usd * gpu_count * (percentage / 100)
+
+            # Convert to AUD
+            model_cost = total_gpu_cost_usd / AUD_TO_USD
+
+            total += model_cost
+
+            breakdown.append(CostBreakdown(
+                category="LLM Costs (GPU)",
+                subcategory=f"{model} ({gpu_type})",
+                monthly_cost=model_cost,
+                annual_cost=model_cost * 12,
+                unit=f"{gpu_type} GPU(s)",
+                quantity=gpu_count,
+                notes=f"{percentage}% allocation, {gpu_count}x {gpu_type} GPU(s) @ ${gpu_hourly_cost}/hr ({service_tier} tier)",
+                calculation_formula=f"{gpu_count} GPUs × ${gpu_hourly_cost}/hour × 730 hours × {percentage}% = ${model_cost:,.2f}/month",
+                cost_drivers=[
+                    f"Tier: {service_tier.title()} tier → {gpu_count} GPU(s)",
+                    f"GPU Type: {gpu_type} (${gpu_hourly_cost}/hour)",
+                    f"Allocation: {percentage}% of workload",
+                    "Runtime: 730 hours/month (24/7 availability)"
+                ],
+                optimization_tips=[
+                    "Consider Standard tier (2 GPUs) for balanced cost/performance",
+                    "Use model quantization to run on cheaper GPU types",
+                    "Implement auto-scaling to reduce GPU usage during low-traffic periods",
+                    f"Switch to Cloud API for variable workloads (pay per token)"
+                ]
+            ))
+    else:
+        # Handle Cloud API deployment (token-based pricing)
+        for model, percentage in llm_mix.items():
+            if percentage <= 0:
+                continue
+
+            # Get pricing for this model
+            pricing = LLM_PRICING_USD.get(model, {"input": 2.50, "output": 10.00, "cache_read": 1.25})
+
+            # Calculate tokens for this model
+            model_queries = total_queries * (percentage / 100)
+            input_tokens = model_queries * avg_input_tokens
+            output_tokens = model_queries * avg_output_tokens
+
+            # Apply caching
+            if use_prompt_caching and "cache_read" in pricing:
+                cached_input_tokens = input_tokens * cache_hit_rate
+                fresh_input_tokens = input_tokens * (1 - cache_hit_rate)
+
+                # Cost calculation
+                input_cost = (cached_input_tokens / 1000000 * pricing["cache_read"] +
+                             fresh_input_tokens / 1000000 * pricing["input"])
+            else:
+                input_cost = input_tokens / 1000000 * pricing["input"]
+
+            output_cost = output_tokens / 1000000 * pricing["output"]
+            model_cost = (input_cost + output_cost) / AUD_TO_USD  # Convert to AUD
+
+            total += model_cost
+
+            breakdown.append(CostBreakdown(
+                category="LLM Costs (API)",
+                subcategory=model,
+                monthly_cost=model_cost,
+                annual_cost=model_cost * 12,
+                unit="tokens",
+                quantity=input_tokens + output_tokens,
+                notes=f"{percentage}% of queries, {cache_hit_rate*100:.0f}% cache hit rate"
+            ))
 
     return total, breakdown
 
@@ -449,40 +541,192 @@ def calculate_monitoring_costs(data_ingestion_gb: float, service_tier: str = "st
 
 def calculate_memory_system_costs(memory_type: str, infrastructure: Dict[str, float], service_tier: str = "standard") -> tuple[float, List[CostBreakdown]]:
     """
-    Calculate memory system costs based on service tier configuration
-    THIS ADDRESSES USER'S QUESTION: Memory selection now affects costs based on tier!
+    Calculate memory system costs based on actual memory type selected.
+    FIXED: Now honors the memory_type parameter instead of always using tier default.
     """
     breakdown = []
 
-    # Get tier-specific memory configuration from service_tiers.py
+    # Get tier-specific memory configuration as fallback
     tier_config = get_tier_config(service_tier)
-    memory_config = tier_config.get("memory", {})
+    tier_memory_config = tier_config.get("memory", {})
 
-    monthly_cost = memory_config.get("monthly_cost", 0.0)
-    memory_type_tier = memory_config.get("type", "in_memory")
-    capacity_gb = memory_config.get("capacity_gb", 0)
-    persistence = memory_config.get("persistence", False)
-    replication = memory_config.get("replication", False)
+    # CRITICAL FIX: Honor the memory_type parameter if provided
+    if memory_type and memory_type not in ["default", ""]:
+        # Normalize memory_type (handle both dash and underscore variants)
+        normalized_type = memory_type.replace("-", "_").lower()
 
-    features = []
-    if persistence:
-        features.append("Persistence")
-    if replication:
-        features.append("Replication")
-    if memory_config.get("global_distribution"):
-        features.append("Global Distribution")
+        if normalized_type in ["cosmos_db", "cosmosdb"]:
+            # Calculate actual Cosmos DB cost based on RU/s
+            # Use minimum 10,000 RU/s if tier has 0 (user explicitly selected cosmos-db)
+            cosmos_ru = infrastructure.get("cosmos_ru", 15000)
+            if cosmos_ru == 0:
+                cosmos_ru = 10000  # Minimum provisioned throughput for Cosmos DB
+            # Formula: (RU/s ÷ 100) × $0.012 AUD/hour × 730 hours
+            monthly_cost = (cosmos_ru / 100) * 0.012 * 730
+            capacity_str = f"{int(cosmos_ru):,} RU/s"
+            features_str = "Multi-model NoSQL, Global Distribution, Auto-scaling"
 
-    features_str = ", ".join(features) if features else "No advanced features"
+            breakdown.append(CostBreakdown(
+                category="Memory System",
+                subcategory=f"Cosmos DB ({service_tier.title()} Tier)",
+                monthly_cost=monthly_cost,
+                annual_cost=monthly_cost * 12,
+                unit="RU/s",
+                quantity=cosmos_ru,
+                notes=f"{capacity_str} provisioned throughput. {features_str}",
+                calculation_formula=f"({int(cosmos_ru):,} RU/s ÷ 100) × $0.012/hour × 730 hours = ${monthly_cost:,.2f}/month",
+                cost_drivers=[
+                    f"Request Units: {int(cosmos_ru):,} RU/s (primary cost driver)",
+                    "Storage: Minimal impact at current scale",
+                    "Multi-region replication: If enabled",
+                    "Auto-scale vs provisioned: Currently provisioned"
+                ],
+                optimization_tips=[
+                    f"Current: {int(cosmos_ru):,} RU/s. Monitor actual usage to right-size.",
+                    "Enable auto-scale to pay only for RU/s used (vs provisioned)",
+                    "Use reserved capacity for 1-3 year terms (up to 63% savings)",
+                    "Optimize queries to reduce RU consumption",
+                    "Consider serverless mode for unpredictable workloads"
+                ]
+            ))
 
-    breakdown.append(CostBreakdown(
-        category="Memory System",
-        subcategory=f"{memory_type_tier.title()} ({service_tier.title()} Tier)",
-        monthly_cost=monthly_cost,
-        annual_cost=monthly_cost * 12,
-        unit="GB",
-        quantity=capacity_gb,
-        notes=f"{capacity_gb}GB capacity. Features: {features_str}"
-    ))
+        elif normalized_type == "redis":
+            # Calculate Redis cost based on capacity
+            capacity_gb = tier_memory_config.get("capacity_gb", 6)
+            # C6 (6GB) = $0.765/hour × 730 = $558.45/month
+            hourly_cost = 0.765 if capacity_gb >= 6 else 0.096  # C1 for < 6GB
+            monthly_cost = hourly_cost * 730
+
+            breakdown.append(CostBreakdown(
+                category="Memory System",
+                subcategory=f"Redis ({service_tier.title()} Tier)",
+                monthly_cost=monthly_cost,
+                annual_cost=monthly_cost * 12,
+                unit="GB",
+                quantity=capacity_gb,
+                notes=f"{capacity_gb}GB Azure Cache for Redis. Persistence enabled, Replication enabled",
+                calculation_formula=f"${hourly_cost}/hour × 730 hours = ${monthly_cost:,.2f}/month (C{6 if capacity_gb >= 6 else 1} tier)",
+                cost_drivers=[
+                    f"Cache size: {capacity_gb}GB (determines tier)",
+                    "Premium features: Persistence, Clustering, Geo-replication",
+                    "Azure Cache for Redis Standard/Premium tier",
+                    "Region: Australia East"
+                ],
+                optimization_tips=[
+                    "Use Basic tier if persistence not required (50% savings)",
+                    f"Monitor memory usage - if < {capacity_gb * 0.6}GB consistently, downsize",
+                    "Enable data eviction policies to reduce memory pressure",
+                    "Consider moving cold data to Cosmos DB or SQL"
+                ]
+            ))
+
+        elif normalized_type == "neo4j":
+            # Calculate Neo4j cost based on number of nodes
+            neo4j_nodes = int(infrastructure.get("neo4j_nodes", 1))
+            # Standard_D16s_v5 reserved: $0.691/hour per node
+            hourly_cost_per_node = 0.691
+            monthly_cost = hourly_cost_per_node * neo4j_nodes * 730
+
+            breakdown.append(CostBreakdown(
+                category="Memory System",
+                subcategory=f"Neo4j ({service_tier.title()} Tier)",
+                monthly_cost=monthly_cost,
+                annual_cost=monthly_cost * 12,
+                unit="nodes",
+                quantity=neo4j_nodes,
+                notes=f"{neo4j_nodes} Neo4j cluster nodes. Graph database for relationship mapping",
+                calculation_formula=f"{neo4j_nodes} nodes × ${hourly_cost_per_node}/hour × 730 hours = ${monthly_cost:,.2f}/month",
+                cost_drivers=[
+                    f"Number of nodes: {neo4j_nodes}",
+                    "VM SKU: Standard_D16s_v5 (16 vCPU, 64GB RAM) per node",
+                    "Reserved Instance pricing (1-year)",
+                    "Storage: Premium SSD for graph data",
+                    "High availability: Multi-node clustering"
+                ],
+                optimization_tips=[
+                    "Use single node for development/testing environments",
+                    f"Current: {neo4j_nodes} nodes. Scale down if graph < 1M nodes",
+                    "Consider managed graph services if operational overhead is high",
+                    "Optimize Cypher queries to reduce compute requirements"
+                ]
+            ))
+
+        elif normalized_type in ["in_memory", "in-memory"]:
+            # In-memory has zero cost
+            monthly_cost = 0.0
+            capacity_gb = tier_memory_config.get("capacity_gb", 4)
+
+            breakdown.append(CostBreakdown(
+                category="Memory System",
+                subcategory=f"In-Memory ({service_tier.title()} Tier)",
+                monthly_cost=0.0,
+                annual_cost=0.0,
+                unit="GB",
+                quantity=capacity_gb,
+                notes=f"{capacity_gb}GB application memory. WARNING: Data lost on restart, not suitable for production",
+                calculation_formula="$0.00/month (uses application memory, no external service)",
+                cost_drivers=[
+                    "No infrastructure cost (uses app memory)",
+                    "Limited by container/VM memory allocation",
+                    "Non-persistent: Data lost on restart"
+                ],
+                optimization_tips=[
+                    "Only use for stateless applications or development",
+                    "Migrate to Redis for production workloads",
+                    "Implement external persistence for critical data",
+                    "WARNING: Not suitable for production use"
+                ]
+            ))
+
+        else:
+            # Unknown memory type - fall back to tier default
+            monthly_cost = tier_memory_config.get("monthly_cost", 0.0)
+            memory_type_tier = tier_memory_config.get("type", "in_memory")
+            capacity_gb = tier_memory_config.get("capacity_gb", 0)
+
+            breakdown.append(CostBreakdown(
+                category="Memory System",
+                subcategory=f"{memory_type_tier.title()} ({service_tier.title()} Tier - Default)",
+                monthly_cost=monthly_cost,
+                annual_cost=monthly_cost * 12,
+                unit="GB",
+                quantity=capacity_gb,
+                notes=f"Unknown memory type '{memory_type}', using tier default: {memory_type_tier}"
+            ))
+
+    else:
+        # No memory_type specified - use tier default
+        monthly_cost = tier_memory_config.get("monthly_cost", 0.0)
+        memory_type_tier = tier_memory_config.get("type", "in_memory")
+        capacity_gb = tier_memory_config.get("capacity_gb", 0)
+        persistence = tier_memory_config.get("persistence", False)
+        replication = tier_memory_config.get("replication", False)
+
+        features = []
+        if persistence:
+            features.append("Persistence")
+        if replication:
+            features.append("Replication")
+        if tier_memory_config.get("global_distribution"):
+            features.append("Global Distribution")
+
+        features_str = ", ".join(features) if features else "No advanced features"
+
+        breakdown.append(CostBreakdown(
+            category="Memory System",
+            subcategory=f"{memory_type_tier.title()} ({service_tier.title()} Tier - Default)",
+            monthly_cost=monthly_cost,
+            annual_cost=monthly_cost * 12,
+            unit="GB",
+            quantity=capacity_gb,
+            notes=f"{capacity_gb}GB capacity. Features: {features_str}",
+            calculation_formula=f"Tier default configuration: ${monthly_cost:,.2f}/month",
+            cost_drivers=[
+                f"Service tier: {service_tier}",
+                f"Default memory type: {memory_type_tier}",
+                f"Capacity: {capacity_gb}GB"
+            ]
+        ))
 
     return monthly_cost, breakdown
 
@@ -668,14 +912,16 @@ async def calculate_costs(params: CostCalculatorRequest):
     total_input_tokens = total_queries * params.avg_input_tokens
     total_output_tokens = total_queries * params.avg_output_tokens
 
-    # Calculate LLM costs
+    # Calculate LLM costs (handles both Cloud API and On-Premise deployments)
     llm_total, llm_breakdown = calculate_llm_costs(
         params.llm_mix,
         total_queries,
         params.avg_input_tokens,
         params.avg_output_tokens,
         params.cache_hit_rate,
-        params.use_prompt_caching
+        params.use_prompt_caching,
+        deployment_type=params.deployment_type,
+        service_tier=params.service_tier
     )
 
     # Calculate infrastructure costs
@@ -721,6 +967,39 @@ async def calculate_costs(params: CostCalculatorRequest):
     variable_monthly = llm_total
     total_monthly = fixed_monthly + variable_monthly
 
+    # NEW: Calculate Global Usage Metrics (per-user breakdown)
+    tokens_per_user = (params.avg_input_tokens + params.avg_output_tokens) * params.queries_per_user_per_month
+    storage_per_user = (infra["storage_hot_tb"] + infra["storage_cool_tb"]) * 1024 / params.num_users if params.num_users > 0 else 0  # Convert TB to GB
+    cost_per_user = total_monthly / params.num_users if params.num_users > 0 else 0
+    cost_per_query = total_monthly / total_queries if total_queries > 0 else 0
+    total_tokens_month = tokens_per_user * params.num_users
+    cost_per_1k_tokens = (total_monthly / total_tokens_month) * 1000 if total_tokens_month > 0 else 0
+
+    global_usage_metrics = GlobalUsageMetrics(
+        # Per-User Metrics
+        tokens_per_user_per_month=int(tokens_per_user),
+        input_tokens_per_user_per_month=int(params.avg_input_tokens * params.queries_per_user_per_month),
+        output_tokens_per_user_per_month=int(params.avg_output_tokens * params.queries_per_user_per_month),
+        queries_per_user_per_month=params.queries_per_user_per_month,
+        storage_per_user_gb=round(storage_per_user, 2),
+        cost_per_user_per_month=round(cost_per_user, 2),
+
+        # Aggregate Metrics
+        total_users=params.num_users,
+        total_tokens_per_month=int(total_tokens_month),
+        total_storage_gb=round((infra["storage_hot_tb"] + infra["storage_cool_tb"]) * 1024, 2),
+        total_queries_per_month=total_queries,
+
+        # Efficiency Metrics
+        cache_hit_rate=params.cache_hit_rate,
+        avg_tokens_per_query=int(params.avg_input_tokens + params.avg_output_tokens),
+        cost_per_query=round(cost_per_query, 4),
+        cost_per_1k_tokens=round(cost_per_1k_tokens, 4),
+
+        # Description
+        description=f"Usage metrics for {params.num_users} users with {params.queries_per_user_per_month} queries/user/month ({params.service_tier} tier)"
+    )
+
     return CostCalculatorResponse(
         total_monthly_cost=total_monthly,
         total_annual_cost=total_monthly * 12,
@@ -747,7 +1026,8 @@ async def calculate_costs(params: CostCalculatorRequest):
         output_tokens_per_month=total_output_tokens,
         estimated_data_size_gb=infra["storage_hot_tb"] + infra["storage_cool_tb"],
         savings_from_caching=cache_savings,
-        savings_from_reserved_instances=reserved_savings
+        savings_from_reserved_instances=reserved_savings,
+        global_usage_metrics=global_usage_metrics  # NEW: Global Usage Parameters
     )
 
 # ===========================

@@ -451,17 +451,66 @@ memory_systems:
 # ============================================================================
 # MCP TOOLS & FUNCTIONS PRICING
 # ============================================================================
+#
+# This section defines pricing for Model Context Protocol (MCP) tools used by
+# AI agents. There are two types of tools with different cost structures:
+#
+# 1. MCP SERVERS - Always-on infrastructure with FIXED monthly costs
+#    - Run continuously (24/7) to provide instant capabilities
+#    - Cost Formula: VM hourly cost × 730 hours/month
+#    - Does NOT scale with usage volume
+#
+# 2. AZURE FUNCTIONS - Serverless compute with VARIABLE usage-based costs
+#    - Only charged when executed
+#    - Cost Formula: (num_assessments × calls_per_assessment ÷ 1000) × cost_per_1k
+#    - Scales linearly with usage
+#
+# Total MCP Cost = Sum(all server costs) + Sum(all function costs)
+#
+# ============================================================================
 
 mcp_tools:
+  # ==========================================================================
+  # MCP SERVERS (Always-On Infrastructure)
+  # ==========================================================================
+  # These tools run continuously and incur fixed monthly costs regardless of
+  # usage volume. They provide instant response times for critical capabilities.
+  #
+  # Cost Calculation: hourly_rate × 730 hours/month
+  # Example: $0.173/hour × 730 = $126.29/month
+  # ==========================================================================
+
   servers:
-    # MCP Servers run continuously
     - name: "research_tool"
       type: "mcp_server"
       description: "Web research and data retrieval"
       infrastructure:
-        vm_sku: "Standard_D4s_v5"
-        cost_per_hour_aud: 0.173  # Reserved
-        monthly_cost_aud: 126.29  # 730 hours
+        vm_sku: "Standard_D4s_v5"  # 4 vCPU, 16 GB RAM
+        cost_per_hour_aud: 0.173    # Azure Reserved 1-year pricing
+        monthly_cost_aud: 126.29    # 0.173 × 730 hours
+
+      # Cost explanation for transparency
+      cost_explanation: |
+        Fixed monthly cost for 24/7 web research capabilities.
+
+        Calculation: $0.173/hour × 730 hours = $126.29/month
+
+        VM: Standard_D4s_v5 (4 vCPU, 16GB RAM) in Australia East
+        Pricing: Azure Reserved Instance (1-year) - 50% savings vs PAYG
+
+      when_to_use: "Required for agents that need real-time web research, competitor analysis, news monitoring, or market intelligence gathering."
+
+      cost_drivers:
+        - "VM size: Standard_D4s_v5 (fixed infrastructure)"
+        - "Reserved vs PAYG: 1-year reservation saves 50%"
+        - "Region: Australia East (Sydney)"
+        - "Usage volume: Does NOT affect cost (always-on)"
+
+      optimization_tips:
+        - "Already optimized with Reserved Instance pricing"
+        - "Consider 3-year reservation for 60% savings (vs 50%)"
+        - "Share across multiple agents to amortize cost"
+        - "Alternative: Use Azure Functions if usage is sporadic"
 
     - name: "content_generation_tool"
       type: "mcp_server"
@@ -471,17 +520,87 @@ mcp_tools:
         cost_per_hour_aud: 0.173
         monthly_cost_aud: 126.29
 
+      cost_explanation: |
+        Fixed monthly cost for content generation infrastructure.
+
+        Calculation: $0.173/hour × 730 hours = $126.29/month
+
+        Provides instant templating, document generation, email drafting,
+        presentation creation, and content formatting capabilities.
+
+      when_to_use: "Essential for sales/marketing agents that generate reports, proposals, emails, presentations, or any formatted content."
+
+      cost_drivers:
+        - "VM size: Standard_D4s_v5"
+        - "Template complexity: More complex templates may need more memory"
+        - "Concurrent users: Single VM handles up to 100 concurrent users"
+
+      optimization_tips:
+        - "Batch content generation during off-peak hours"
+        - "Use template caching to reduce generation overhead"
+        - "Consider downgrading to D2s if usage is light"
+
     - name: "competitive_intel_tool"
       type: "mcp_server"
       description: "Competitor analysis and market data"
       infrastructure:
-        vm_sku: "Standard_D8s_v5"  # Larger for data processing
-        cost_per_hour_aud: 0.346
-        monthly_cost_aud: 252.58
+        vm_sku: "Standard_D8s_v5"  # Larger VM for data processing
+        cost_per_hour_aud: 0.346   # 2× cost for 2× capacity
+        monthly_cost_aud: 252.58   # 0.346 × 730 hours
+
+      cost_explanation: |
+        Fixed monthly cost for competitive intelligence capabilities.
+
+        Calculation: $0.346/hour × 730 hours = $252.58/month
+
+        Uses larger VM (8 vCPU, 32GB RAM) for heavy data processing:
+        - Web scraping of competitor sites
+        - Market data aggregation
+        - News and social media monitoring
+        - Pricing intelligence
+        - Product comparison analysis
+
+      when_to_use: "For sales/marketing teams requiring continuous competitor monitoring, pricing intelligence, market trends, or product comparison data."
+
+      cost_drivers:
+        - "VM size: Standard_D8s_v5 (8 vCPU, 32GB) - 2× larger than basic tools"
+        - "Data processing volume: Scrapes dozens of sites hourly"
+        - "External API costs: News, social media APIs (included in VM cost)"
+        - "Storage: Competitor data history (minimal, <10GB)"
+
+      optimization_tips:
+        - "Reduce scraping frequency during weekends/holidays"
+        - "Use incremental updates instead of full scrapes"
+        - "Cache competitor data with 24-hour TTL"
+        - "Consider serverless alternative if competitive intel is needed <10 hours/day"
+
+  # ==========================================================================
+  # AZURE FUNCTIONS (Pay-Per-Execution)
+  # ==========================================================================
+  # These tools are serverless and only charge when executed. Perfect for
+  # tools that are called sporadically or scale with assessment volume.
+  #
+  # Base Azure Functions Pricing:
+  #   - Execution: $0.30 AUD per 1 million executions
+  #   - Memory: $0.000024 AUD per GB-second
+  #
+  # Cost Calculation Formula:
+  #   Total Executions = num_assessments × avg_calls_per_assessment
+  #   Execution Cost = (Total Executions ÷ 1,000,000) × $0.30
+  #   Memory Cost = (duration_seconds × memory_gb × executions) × $0.000024
+  #   Total Cost = Execution Cost + Memory Cost
+  #
+  # For simplicity, we provide pre-calculated "cost_per_1k_calls" that includes
+  # both execution and memory costs for each function.
+  #
+  # Example Calculation for fog_analysis_tool:
+  #   Assessments: 4,000/month
+  #   Calls per assessment: 5
+  #   Total executions: 4,000 × 5 = 20,000
+  #   Cost: (20,000 ÷ 1,000) × $0.15 = $3.00/month
+  # ==========================================================================
 
   functions:
-    # Azure Functions - pay per execution
-    # Base costs: $0.30 per million executions, $0.000024 per GB-second
     - name: "fog_analysis_tool"
       type: "function"
       description: "Fact/Opinion/Gossip classification"
@@ -489,6 +608,38 @@ mcp_tools:
       memory_mb: 512
       avg_calls_per_assessment: 5
       cost_per_1k_calls_aud: 0.15
+
+      cost_explanation: |
+        Pay-per-execution pricing. Scales with assessment volume.
+
+        Example: 4,000 assessments/month
+          Executions: 4,000 × 5 calls = 20,000 total
+          Cost: (20,000 ÷ 1,000) × $0.15 = $3.00/month
+
+        Breakdown of $0.15 per 1k calls:
+          - Execution cost: $0.30 per 1M = $0.0003 per 1k
+          - Memory cost: 0.5s × 0.5GB × 1k × $0.000024 = $0.006 per 1k
+          - Total: ~$0.0063 (rounded to $0.15 for safety margin)
+
+        Called 5 times per assessment to classify different statements.
+
+      when_to_use: "Essential for Sales Coach agents using the 4Cs framework. Classifies customer statements into Fact (verifiable), Opinion (subjective), or Gossip (unsubstantiated)."
+
+      cost_drivers:
+        - "Number of assessments per month (primary driver)"
+        - "Calls per assessment: 5× (analyzes multiple customer statements)"
+        - "Processing duration: 0.5 seconds per call"
+        - "Memory allocation: 512 MB"
+
+      optimization_tips:
+        - "Batch multiple statements in single call (reduce 5 calls to 1)"
+        - "Cache common FOG patterns to skip analysis"
+        - "Use client-side pre-filtering for obvious facts"
+
+      scaling_example: |
+        1,000 assessments: 1,000 × 5 ÷ 1,000 × $0.15 = $0.75/month
+        4,000 assessments: 4,000 × 5 ÷ 1,000 × $0.15 = $3.00/month
+        10,000 assessments: 10,000 × 5 ÷ 1,000 × $0.15 = $7.50/month
 
     - name: "engagement_excellence_tool"
       type: "function"
@@ -498,6 +649,35 @@ mcp_tools:
       avg_calls_per_assessment: 3
       cost_per_1k_calls_aud: 0.20
 
+      cost_explanation: |
+        Example: 4,000 assessments/month
+          Executions: 4,000 × 3 calls = 12,000 total
+          Cost: (12,000 ÷ 1,000) × $0.20 = $2.40/month
+
+        More expensive than FOG tool due to:
+          - Longer processing time (0.8s vs 0.5s)
+          - More complex analysis (six dimensions)
+
+        Analyzes engagement across: Trust, Value, Impact, Risk, Change, Fit
+
+      when_to_use: "Evaluates customer engagement quality across six strategic dimensions. Essential for relationship assessment and opportunity qualification."
+
+      cost_drivers:
+        - "Assessment volume"
+        - "Calls per assessment: 3× (analyzes different engagement aspects)"
+        - "Longer duration: 0.8s (60% longer than FOG tool)"
+        - "Complex multi-dimensional analysis"
+
+      optimization_tips:
+        - "Combine with other analyses to reduce total calls"
+        - "Cache engagement scores with 7-day TTL"
+        - "Skip analysis for low-priority opportunities"
+
+      scaling_example: |
+        1,000 assessments: 1,000 × 3 ÷ 1,000 × $0.20 = $0.60/month
+        4,000 assessments: 4,000 × 3 ÷ 1,000 × $0.20 = $2.40/month
+        10,000 assessments: 10,000 × 3 ÷ 1,000 × $0.20 = $6.00/month
+
     - name: "impact_theme_generator_tool"
       type: "function"
       description: "Generate impact themes"
@@ -505,6 +685,37 @@ mcp_tools:
       memory_mb: 1024
       avg_calls_per_assessment: 2
       cost_per_1k_calls_aud: 0.25
+
+      cost_explanation: |
+        Example: 4,000 assessments/month
+          Executions: 4,000 × 2 calls = 8,000 total
+          Cost: (8,000 ÷ 1,000) × $0.25 = $2.00/month
+
+        HIGHEST cost per call due to:
+          - Longest duration: 1.0 second (2× FOG tool)
+          - Double memory: 1,024 MB vs 512 MB
+          - LLM-based theme generation (uses additional tokens)
+
+        Generates personalized value proposition themes for customers.
+
+      when_to_use: "Creates compelling impact themes for value propositions, presentations, and customer messaging. Critical for personalized sales approaches."
+
+      cost_drivers:
+        - "Duration: 1.0 second (longest of all functions)"
+        - "Memory: 1,024 MB (double standard)"
+        - "LLM token usage: Generates creative themes (~500 tokens output)"
+        - "Calls per assessment: 2× (primary + alternative themes)"
+
+      optimization_tips:
+        - "Generate themes only for qualified opportunities"
+        - "Reuse themes for similar customer profiles"
+        - "Cache themes by industry vertical"
+        - "Reduce output tokens with concise prompts"
+
+      scaling_example: |
+        1,000 assessments: 1,000 × 2 ÷ 1,000 × $0.25 = $0.50/month
+        4,000 assessments: 4,000 × 2 ÷ 1,000 × $0.25 = $2.00/month
+        10,000 assessments: 10,000 × 2 ÷ 1,000 × $0.25 = $5.00/month
 
     - name: "license_to_sell_tool"
       type: "function"
@@ -514,6 +725,37 @@ mcp_tools:
       avg_calls_per_assessment: 1
       cost_per_1k_calls_aud: 0.10
 
+      cost_explanation: |
+        Example: 4,000 assessments/month
+          Executions: 4,000 × 1 call = 4,000 total
+          Cost: (4,000 ÷ 1,000) × $0.10 = $0.40/month
+
+        CHEAPEST function due to:
+          - Single call per assessment (1×)
+          - Fast execution: 0.3 seconds
+          - Low memory: 256 MB (half standard)
+          - Simple calculation logic
+
+        Quick validation of sales readiness based on trust metrics.
+
+      when_to_use: "Validates that salesperson has earned 'license to sell' based on trust score, credibility, and relationship strength. Gate-check before progressing opportunities."
+
+      cost_drivers:
+        - "Single call per assessment (lowest frequency)"
+        - "Shortest duration: 0.3 seconds"
+        - "Minimal memory: 256 MB"
+        - "Simple scoring algorithm (no LLM)"
+
+      optimization_tips:
+        - "Already optimized (cheapest function)"
+        - "Consider client-side calculation if logic is simple enough"
+        - "Cache results per salesperson/customer pair"
+
+      scaling_example: |
+        1,000 assessments: 1,000 × 1 ÷ 1,000 × $0.10 = $0.10/month
+        4,000 assessments: 4,000 × 1 ÷ 1,000 × $0.10 = $0.40/month
+        10,000 assessments: 10,000 × 1 ÷ 1,000 × $0.10 = $1.00/month
+
     - name: "find_money_validator_tool"
       type: "function"
       description: "Budget validation"
@@ -521,6 +763,65 @@ mcp_tools:
       memory_mb: 512
       avg_calls_per_assessment: 2
       cost_per_1k_calls_aud: 0.15
+
+      cost_explanation: |
+        Example: 4,000 assessments/month
+          Executions: 4,000 × 2 calls = 8,000 total
+          Cost: (8,000 ÷ 1,000) × $0.15 = $1.20/month
+
+        Validates customer budget and financial authority.
+        Called twice: initial validation + final confirmation.
+
+      when_to_use: "Validates that customer has budget, financial authority, and funding timeline. Critical for deal qualification and forecasting accuracy."
+
+      cost_drivers:
+        - "Calls per assessment: 2× (initial + confirmation)"
+        - "Duration: 0.5 seconds"
+        - "Budget data retrieval from CRM/finance systems"
+        - "External API calls: Credit checks, financial data"
+
+      optimization_tips:
+        - "Skip confirmation call for deals < $10k"
+        - "Cache budget validation for 30 days"
+        - "Batch validate multiple deals from same customer"
+
+      scaling_example: |
+        1,000 assessments: 1,000 × 2 ÷ 1,000 × $0.15 = $0.30/month
+        4,000 assessments: 4,000 × 2 ÷ 1,000 × $0.15 = $1.20/month
+        10,000 assessments: 10,000 × 2 ÷ 1,000 × $0.15 = $3.00/month
+
+# ============================================================================
+# MCP TOOLS TOTAL COST EXAMPLE
+# ============================================================================
+# For Sales Coach with 4,000 assessments/month and all tools enabled:
+#
+# MCP Servers (Fixed):
+#   • research_tool:               $126.29
+#   • content_generation_tool:     $126.29
+#   • competitive_intel_tool:      $252.58
+#   Subtotal (Fixed):              $505.16/month
+#
+# Azure Functions (Variable):
+#   • fog_analysis_tool:           $3.00  (20,000 executions)
+#   • engagement_excellence_tool:  $2.40  (12,000 executions)
+#   • impact_theme_generator_tool: $2.00  (8,000 executions)
+#   • license_to_sell_tool:        $0.40  (4,000 executions)
+#   • find_money_validator_tool:   $1.20  (8,000 executions)
+#   Subtotal (Variable):           $9.00/month
+#
+# TOTAL MCP TOOLS COST:            $514.16/month
+#
+# Scaling Analysis:
+#   - Fixed costs ($505.16) remain constant regardless of usage
+#   - Variable costs ($9.00) scale linearly with assessments
+#   - At 8,000 assessments: Fixed $505.16 + Variable $18.00 = $523.16
+#   - At 2,000 assessments: Fixed $505.16 + Variable $4.50 = $509.66
+#
+# Break-even Analysis:
+#   - If usage < 1,000 assessments/month: Consider disabling MCP servers
+#   - If usage > 10,000 assessments/month: MCP servers highly cost-effective
+#   - Functions scale efficiently: 10× usage = only 10× function cost
+# ============================================================================
 
 # ============================================================================
 # DATA SOURCES PRICING (Enterprise Tier)

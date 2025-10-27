@@ -237,7 +237,7 @@ const SalesCoach = () => {
   const [globalParams, setGlobalParams] = useState({
     num_users: 100,
     assessments_per_user_per_month: 40, // 10 deals x 4 assessments each
-    service_tier: 'premium' // Default to premium
+    service_tier: 'basic' // Default to basic tier
   });
 
   // Service tiers state

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, TrendingUp, Server, Database, Cloud, BarChart3, Users, Zap, Settings, RefreshCw } from 'lucide-react';
+import { DollarSign, TrendingUp, Server, Database, Cloud, BarChart3, Users, Zap, Settings, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 import axios from 'axios';
 import { useAppContext } from './AppContext';
 
@@ -19,6 +19,9 @@ const CostCalculator = () => {
   // Cost calculation results
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // Expanded rows state for showing formula, drivers, tips
+  const [expandedRows, setExpandedRows] = useState({});
 
   // Parameters
   const [params, setParams] = useState({
@@ -136,6 +139,59 @@ const CostCalculator = () => {
     return new Intl.NumberFormat('en-US').format(num);
   };
 
+  // Toggle expanded row
+  const toggleRow = (tabName, idx) => {
+    const key = `${tabName}-${idx}`;
+    setExpandedRows(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  // Render expanded row details
+  const renderExpandedDetails = (item) => {
+    const hasDetails = item.calculation_formula || (item.cost_drivers && item.cost_drivers.length > 0) || (item.optimization_tips && item.optimization_tips.length > 0);
+
+    if (!hasDetails) return null;
+
+    return (
+      <div className="p-4 space-y-3">
+        {item.calculation_formula && (
+          <div>
+            <div className="text-sm font-semibold text-gray-700 mb-1">Formula:</div>
+            <code className="block bg-gray-100 px-3 py-2 rounded text-sm font-mono text-gray-800">
+              {item.calculation_formula}
+            </code>
+          </div>
+        )}
+
+        {item.cost_drivers && item.cost_drivers.length > 0 && (
+          <div>
+            <div className="text-sm font-semibold text-gray-700 mb-1">Cost Drivers:</div>
+            <ul className="list-disc list-inside ml-2 text-sm text-gray-600 space-y-1">
+              {item.cost_drivers.map((driver, i) => (
+                <li key={i}>{driver}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {item.optimization_tips && item.optimization_tips.length > 0 && (
+          <div className="bg-green-50 border border-green-200 rounded p-3">
+            <div className="flex items-center mb-2">
+              <span className="text-green-700 font-semibold text-sm">💡 Optimization Tips:</span>
+            </div>
+            <ul className="list-disc list-inside ml-2 text-sm text-green-700 space-y-1">
+              {item.optimization_tips.map((tip, i) => (
+                <li key={i}>{tip}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Tab content components
   const OverviewTab = () => (
     <div className="space-y-6">
@@ -177,6 +233,90 @@ const CostCalculator = () => {
           <p className="text-xs opacity-75 mt-1">12-month projection</p>
         </div>
       </div>
+
+      {/* Global Usage Parameters */}
+      {results && results.global_usage_metrics && (
+        <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
+          <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+            <Users className="w-6 h-6 mr-2 text-blue-600" />
+            Global Usage Parameters
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            {results.global_usage_metrics.description}
+          </p>
+
+          {/* Per-User Metrics */}
+          <div className="mb-6">
+            <h4 className="font-semibold text-gray-700 mb-3">Per-User Metrics</h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-blue-50 rounded-lg p-4">
+                <div className="text-sm text-blue-600 font-medium">Tokens/User/Month</div>
+                <div className="text-2xl font-bold text-blue-900">
+                  {formatNumber(results.global_usage_metrics.tokens_per_user_per_month)}
+                </div>
+                <div className="text-xs text-blue-600 mt-1">
+                  Input: {formatNumber(results.global_usage_metrics.input_tokens_per_user_per_month)} |
+                  Output: {formatNumber(results.global_usage_metrics.output_tokens_per_user_per_month)}
+                </div>
+              </div>
+
+              <div className="bg-green-50 rounded-lg p-4">
+                <div className="text-sm text-green-600 font-medium">Storage/User</div>
+                <div className="text-2xl font-bold text-green-900">
+                  {results.global_usage_metrics.storage_per_user_gb.toFixed(2)} GB
+                </div>
+                <div className="text-xs text-green-600 mt-1">
+                  Total: {results.global_usage_metrics.total_storage_gb.toFixed(2)} GB
+                </div>
+              </div>
+
+              <div className="bg-purple-50 rounded-lg p-4">
+                <div className="text-sm text-purple-600 font-medium">Cost/User/Month</div>
+                <div className="text-2xl font-bold text-purple-900">
+                  {formatCurrency(results.global_usage_metrics.cost_per_user_per_month)}
+                </div>
+                <div className="text-xs text-purple-600 mt-1">
+                  {results.global_usage_metrics.queries_per_user_per_month} queries/user
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Efficiency Metrics */}
+          <div>
+            <h4 className="font-semibold text-gray-700 mb-3">Efficiency Metrics</h4>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-orange-50 rounded-lg p-4">
+                <div className="text-sm text-orange-600 font-medium">Cost/Query</div>
+                <div className="text-xl font-bold text-orange-900">
+                  ${results.global_usage_metrics.cost_per_query.toFixed(4)}
+                </div>
+              </div>
+
+              <div className="bg-pink-50 rounded-lg p-4">
+                <div className="text-sm text-pink-600 font-medium">Cost/1K Tokens</div>
+                <div className="text-xl font-bold text-pink-900">
+                  ${results.global_usage_metrics.cost_per_1k_tokens.toFixed(4)}
+                </div>
+              </div>
+
+              <div className="bg-indigo-50 rounded-lg p-4">
+                <div className="text-sm text-indigo-600 font-medium">Cache Hit Rate</div>
+                <div className="text-xl font-bold text-indigo-900">
+                  {(results.global_usage_metrics.cache_hit_rate * 100).toFixed(1)}%
+                </div>
+              </div>
+
+              <div className="bg-teal-50 rounded-lg p-4">
+                <div className="text-sm text-teal-600 font-medium">Tokens/Query</div>
+                <div className="text-xl font-bold text-teal-900">
+                  {formatNumber(results.global_usage_metrics.avg_tokens_per_query)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Agent Architecture */}
       {results && results.agent_architecture && (
@@ -310,6 +450,7 @@ const CostCalculator = () => {
           <table className="w-full">
             <thead>
               <tr className="border-b-2 border-gray-200">
+                <th className="text-left py-3 px-4 font-semibold text-gray-700 w-8"></th>
                 <th className="text-left py-3 px-4 font-semibold text-gray-700">Resource</th>
                 <th className="text-right py-3 px-4 font-semibold text-gray-700">Quantity</th>
                 <th className="text-right py-3 px-4 font-semibold text-gray-700">Monthly</th>
@@ -318,17 +459,42 @@ const CostCalculator = () => {
               </tr>
             </thead>
             <tbody>
-              {results.infrastructure_breakdown.map((item, idx) => (
-                <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
-                  <td className="py-3 px-4 text-right text-gray-600">{item.quantity.toFixed(0)} {item.unit}</td>
-                  <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
-                  <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
-                  <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
-                </tr>
-              ))}
+              {results.infrastructure_breakdown.map((item, idx) => {
+                const rowKey = `infrastructure-${idx}`;
+                const isExpanded = expandedRows[rowKey];
+                const hasDetails = item.calculation_formula || (item.cost_drivers && item.cost_drivers.length > 0) || (item.optimization_tips && item.optimization_tips.length > 0);
+
+                return (
+                  <React.Fragment key={idx}>
+                    <tr
+                      className={`border-b border-gray-100 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => hasDetails && toggleRow('infrastructure', idx)}
+                    >
+                      <td className="py-3 px-4">
+                        {hasDetails && (
+                          isExpanded ? <ChevronDown className="w-4 h-4 text-gray-600" /> : <ChevronRight className="w-4 h-4 text-gray-600" />
+                        )}
+                      </td>
+                      <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
+                      <td className="py-3 px-4 text-right text-gray-600">{item.quantity.toFixed(0)} {item.unit}</td>
+                      <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
+                      <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
+                      <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
+                    </tr>
+                    {isExpanded && hasDetails && (
+                      <tr>
+                        <td colSpan="6" className="bg-gray-50 border-t border-gray-200">
+                          {renderExpandedDetails(item)}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
               <tr className="bg-blue-50 font-bold">
-                <td className="py-3 px-4 text-gray-900" colSpan="2">Total Infrastructure</td>
+                <td className="py-3 px-4"></td>
+                <td className="py-3 px-4 text-gray-900">Total Infrastructure</td>
+                <td className="py-3 px-4"></td>
                 <td className="py-3 px-4 text-right text-blue-900">{formatCurrency(results.infrastructure_costs)}</td>
                 <td className="py-3 px-4 text-right text-blue-900">{formatCurrency(results.infrastructure_costs * 12)}</td>
                 <td></td>
@@ -350,6 +516,7 @@ const CostCalculator = () => {
           <table className="w-full">
             <thead>
               <tr className="border-b-2 border-gray-200">
+                <th className="text-left py-3 px-4 font-semibold text-gray-700 w-8"></th>
                 <th className="text-left py-3 px-4 font-semibold text-gray-700">Model</th>
                 <th className="text-right py-3 px-4 font-semibold text-gray-700">Tokens</th>
                 <th className="text-right py-3 px-4 font-semibold text-gray-700">Monthly</th>
@@ -358,17 +525,42 @@ const CostCalculator = () => {
               </tr>
             </thead>
             <tbody>
-              {results.llm_breakdown.map((item, idx) => (
-                <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
-                  <td className="py-3 px-4 text-right text-gray-600">{formatNumber(item.quantity)}</td>
-                  <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
-                  <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
-                  <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
-                </tr>
-              ))}
+              {results.llm_breakdown.map((item, idx) => {
+                const rowKey = `llm-${idx}`;
+                const isExpanded = expandedRows[rowKey];
+                const hasDetails = item.calculation_formula || (item.cost_drivers && item.cost_drivers.length > 0) || (item.optimization_tips && item.optimization_tips.length > 0);
+
+                return (
+                  <React.Fragment key={idx}>
+                    <tr
+                      className={`border-b border-gray-100 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => hasDetails && toggleRow('llm', idx)}
+                    >
+                      <td className="py-3 px-4">
+                        {hasDetails && (
+                          isExpanded ? <ChevronDown className="w-4 h-4 text-gray-600" /> : <ChevronRight className="w-4 h-4 text-gray-600" />
+                        )}
+                      </td>
+                      <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
+                      <td className="py-3 px-4 text-right text-gray-600">{formatNumber(item.quantity)}</td>
+                      <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
+                      <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
+                      <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
+                    </tr>
+                    {isExpanded && hasDetails && (
+                      <tr>
+                        <td colSpan="6" className="bg-gray-50 border-t border-gray-200">
+                          {renderExpandedDetails(item)}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
               <tr className="bg-purple-50 font-bold">
-                <td className="py-3 px-4 text-gray-900" colSpan="2">Total LLM Costs</td>
+                <td className="py-3 px-4"></td>
+                <td className="py-3 px-4 text-gray-900">Total LLM Costs</td>
+                <td className="py-3 px-4"></td>
                 <td className="py-3 px-4 text-right text-purple-900">{formatCurrency(results.llm_costs)}</td>
                 <td className="py-3 px-4 text-right text-purple-900">{formatCurrency(results.llm_costs * 12)}</td>
                 <td></td>
@@ -414,6 +606,7 @@ const CostCalculator = () => {
             <table className="w-full">
               <thead>
                 <tr className="border-b-2 border-gray-200">
+                  <th className="text-left py-3 px-4 font-semibold text-gray-700 w-8"></th>
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Data Source</th>
                   <th className="text-right py-3 px-4 font-semibold text-gray-700">Default Monthly (AUD)</th>
                   <th className="text-right py-3 px-4 font-semibold text-gray-700">Override (USD/month)</th>
@@ -422,26 +615,70 @@ const CostCalculator = () => {
                 </tr>
               </thead>
               <tbody>
-                {results.data_source_breakdown.map((item, idx) => (
-                  <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
-                    <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
-                    <td className="py-3 px-4">
-                      <input
-                        type="number"
-                        min="0"
-                        step="100"
-                        placeholder="Enter USD amount"
-                        value={manualPricing.dataSources[item.subcategory] || ''}
-                        onChange={(e) => handleDataSourcePriceChange(item.subcategory, e.target.value)}
-                        className="w-full px-2 py-1 border border-gray-300 rounded text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      />
-                    </td>
-                    <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
-                    <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
-                  </tr>
-                ))}
+                {results.data_source_breakdown.map((item, idx) => {
+                  const rowKey = `datasource-${idx}`;
+                  const isExpanded = expandedRows[rowKey];
+                  const hasDetails = item.calculation_formula || (item.cost_drivers && item.cost_drivers.length > 0) || (item.optimization_tips && item.optimization_tips.length > 0);
+
+                  return (
+                    <React.Fragment key={idx}>
+                      <tr className="border-b border-gray-100">
+                        <td
+                          className={`py-3 px-4 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                          onClick={() => hasDetails && toggleRow('datasource', idx)}
+                        >
+                          {hasDetails && (
+                            isExpanded ? <ChevronDown className="w-4 h-4 text-gray-600" /> : <ChevronRight className="w-4 h-4 text-gray-600" />
+                          )}
+                        </td>
+                        <td
+                          className={`py-3 px-4 font-medium text-gray-800 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                          onClick={() => hasDetails && toggleRow('datasource', idx)}
+                        >
+                          {item.subcategory}
+                        </td>
+                        <td
+                          className={`py-3 px-4 text-right font-semibold text-gray-900 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                          onClick={() => hasDetails && toggleRow('datasource', idx)}
+                        >
+                          {formatCurrency(item.monthly_cost)}
+                        </td>
+                        <td className="py-3 px-4">
+                          <input
+                            type="number"
+                            min="0"
+                            step="100"
+                            placeholder="Enter USD amount"
+                            value={manualPricing.dataSources[item.subcategory] || ''}
+                            onChange={(e) => handleDataSourcePriceChange(item.subcategory, e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </td>
+                        <td
+                          className={`py-3 px-4 text-right text-gray-600 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                          onClick={() => hasDetails && toggleRow('datasource', idx)}
+                        >
+                          {formatCurrency(item.annual_cost)}
+                        </td>
+                        <td
+                          className={`py-3 px-4 text-sm text-gray-500 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                          onClick={() => hasDetails && toggleRow('datasource', idx)}
+                        >
+                          {item.notes}
+                        </td>
+                      </tr>
+                      {isExpanded && hasDetails && (
+                        <tr>
+                          <td colSpan="6" className="bg-gray-50 border-t border-gray-200">
+                            {renderExpandedDetails(item)}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
                 <tr className="bg-green-50 font-bold">
+                  <td className="py-3 px-4"></td>
                   <td className="py-3 px-4 text-gray-900">Total Data Sources</td>
                   <td className="py-3 px-4 text-right text-green-900">{formatCurrency(results.data_source_costs)}</td>
                   <td className="py-3 px-4 text-center text-xs text-gray-500">Manual overrides above</td>
@@ -490,6 +727,7 @@ const CostCalculator = () => {
             <table className="w-full">
               <thead>
                 <tr className="border-b-2 border-gray-200">
+                  <th className="text-left py-3 px-4 font-semibold text-gray-700 w-8"></th>
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Service</th>
                   <th className="text-right py-3 px-4 font-semibold text-gray-700">Quantity</th>
                   <th className="text-right py-3 px-4 font-semibold text-gray-700">Default Monthly (AUD)</th>
@@ -499,28 +737,78 @@ const CostCalculator = () => {
                 </tr>
               </thead>
               <tbody>
-                {results.monitoring_breakdown.map((item, idx) => (
-                  <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-3 px-4 font-medium text-gray-800">{item.subcategory}</td>
-                    <td className="py-3 px-4 text-right text-gray-600">{item.quantity.toFixed(0)} {item.unit}</td>
-                    <td className="py-3 px-4 text-right font-semibold text-gray-900">{formatCurrency(item.monthly_cost)}</td>
-                    <td className="py-3 px-4">
-                      <input
-                        type="number"
-                        min="0"
-                        step="10"
-                        placeholder="Enter AUD amount"
-                        value={manualPricing.monitoring[item.subcategory] || ''}
-                        onChange={(e) => handleMonitoringPriceChange(item.subcategory, e.target.value)}
-                        className="w-full px-2 py-1 border border-gray-300 rounded text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      />
-                    </td>
-                    <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(item.annual_cost)}</td>
-                    <td className="py-3 px-4 text-sm text-gray-500">{item.notes}</td>
-                  </tr>
-                ))}
+                {results.monitoring_breakdown.map((item, idx) => {
+                  const rowKey = `monitoring-${idx}`;
+                  const isExpanded = expandedRows[rowKey];
+                  const hasDetails = item.calculation_formula || (item.cost_drivers && item.cost_drivers.length > 0) || (item.optimization_tips && item.optimization_tips.length > 0);
+
+                  return (
+                    <React.Fragment key={idx}>
+                      <tr className="border-b border-gray-100">
+                        <td
+                          className={`py-3 px-4 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                          onClick={() => hasDetails && toggleRow('monitoring', idx)}
+                        >
+                          {hasDetails && (
+                            isExpanded ? <ChevronDown className="w-4 h-4 text-gray-600" /> : <ChevronRight className="w-4 h-4 text-gray-600" />
+                          )}
+                        </td>
+                        <td
+                          className={`py-3 px-4 font-medium text-gray-800 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                          onClick={() => hasDetails && toggleRow('monitoring', idx)}
+                        >
+                          {item.subcategory}
+                        </td>
+                        <td
+                          className={`py-3 px-4 text-right text-gray-600 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                          onClick={() => hasDetails && toggleRow('monitoring', idx)}
+                        >
+                          {item.quantity.toFixed(0)} {item.unit}
+                        </td>
+                        <td
+                          className={`py-3 px-4 text-right font-semibold text-gray-900 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                          onClick={() => hasDetails && toggleRow('monitoring', idx)}
+                        >
+                          {formatCurrency(item.monthly_cost)}
+                        </td>
+                        <td className="py-3 px-4">
+                          <input
+                            type="number"
+                            min="0"
+                            step="10"
+                            placeholder="Enter AUD amount"
+                            value={manualPricing.monitoring[item.subcategory] || ''}
+                            onChange={(e) => handleMonitoringPriceChange(item.subcategory, e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </td>
+                        <td
+                          className={`py-3 px-4 text-right text-gray-600 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                          onClick={() => hasDetails && toggleRow('monitoring', idx)}
+                        >
+                          {formatCurrency(item.annual_cost)}
+                        </td>
+                        <td
+                          className={`py-3 px-4 text-sm text-gray-500 ${hasDetails ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                          onClick={() => hasDetails && toggleRow('monitoring', idx)}
+                        >
+                          {item.notes}
+                        </td>
+                      </tr>
+                      {isExpanded && hasDetails && (
+                        <tr>
+                          <td colSpan="7" className="bg-gray-50 border-t border-gray-200">
+                            {renderExpandedDetails(item)}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
                 <tr className="bg-orange-50 font-bold">
-                  <td className="py-3 px-4 text-gray-900" colSpan="2">Total Monitoring</td>
+                  <td className="py-3 px-4"></td>
+                  <td className="py-3 px-4 text-gray-900">Total Monitoring</td>
+                  <td className="py-3 px-4"></td>
                   <td className="py-3 px-4 text-right text-orange-900">{formatCurrency(results.monitoring_costs)}</td>
                   <td className="py-3 px-4 text-center text-xs text-gray-500">Manual overrides above</td>
                   <td className="py-3 px-4 text-right text-orange-900">{formatCurrency(results.monitoring_costs * 12)}</td>
